@@ -182,6 +182,14 @@ import OpenCORPlot, {
   type PlotRenderer,
   type PlotTheme
 } from '../index';
+import {
+  BENCHMARK_INTERACTIONS,
+  BENCHMARK_PAN_ZOOMS,
+  type BenchmarkReport,
+  type BenchmarkResult,
+  type BenchmarkScenario,
+  type DemoBenchmark
+} from './benchmark';
 import { DATA_KINDS, type DataKind, plotData } from './data';
 import { loseWebGlContext, restoreWebGlContext } from './webgl';
 
@@ -443,6 +451,7 @@ const startLive = (): void => {
 // (see plotData() in PlotWidget.vue), and to draw it (e.g., uploading it to the GPU and building its level of detail).
 
 const firstDrawStatus = vue.ref<string>(''); // Time to first draw of our data, if it was not plotted live.
+let firstDrawTime = 0; // Time to first draw of our data (in milliseconds), if it was not plotted live.
 let showGeneration = 0; // Number of times that we showed our data, so that we can discard outdated time measurements.
 
 const showData = (): void => {
@@ -463,7 +472,8 @@ const showData = (): void => {
 
     void nextPaint().then(() => {
       if (generation === showGeneration) {
-        firstDrawStatus.value = `${formatNumber(Math.round(performance.now() - startTime))} ms`;
+        firstDrawTime = performance.now() - startTime;
+        firstDrawStatus.value = `${formatNumber(Math.round(firstDrawTime))} ms`;
       }
     });
   }
@@ -657,7 +667,6 @@ vue.onBeforeUnmount(() => {
 
 const BENCHMARK_DURATION = 5000; // Duration (in milliseconds) of each of our interactions.
 const BENCHMARK_MAX_ZOOM = 100; // Maximum zoom of our zoom interaction.
-const BENCHMARK_PAN_ZOOMS = [1, 10, 100]; // Zooms at which we pan our instances.
 const BENCHMARK_WHEEL_DELTA = 20; // Biggest wheel delta that our plot accounts for, i.e. a zoom factor of e^0.1.
 const BENCHMARK_RESET_DELAY = 500; // Delay (in milliseconds) for our zoom to be reset (since it is animated).
 const BENCHMARK_LIVE_FRAMES = 300; // Number of frames in which we plot all of our data live.
@@ -670,15 +679,10 @@ const zoomSteps = (zoom: number): number => {
   return Math.round((200 / BENCHMARK_WHEEL_DELTA) * Math.log(zoom));
 };
 
-interface BenchmarkResult {
-  fps: string;
-  redraw: string;
-}
-
 const benchmarking = vue.ref<boolean>(false); // Whether we are running our benchmark.
 const benchmarkInteraction = vue.ref<string>(''); // Name of the interaction that we are running, if any.
 const benchmarkResizeScale = vue.ref<number>(1); // Scale of our grid of instances (see our resize interaction).
-const benchmarkResults = vue.ref<Record<string, BenchmarkResult>>({}); // Results of our interactions, by name.
+const benchmarkResults = vue.shallowRef<Record<string, BenchmarkResult>>({}); // Results of our interactions, by name.
 let benchmarkRun = 0; // Number of the current run of our benchmark, so that a stopped run can tell that it was stopped.
 let benchmarkFrameStartId = 0; // Id of our next onFrameStart() callback.
 let benchmarkFrameEndId = 0; // Id of our next onFrameEnd() callback.
@@ -777,8 +781,9 @@ const runInteraction = (interact: (frame: number) => void): Promise<BenchmarkRes
           redrawDurations.reduce((sum, value) => sum + value, 0) / Math.max(1, redrawDurations.length);
 
         resolve({
-          fps: `${Math.round((1000 * nbOfFrames) / (time - startTime))} FPS`,
-          redraw: `${averageRedrawDuration.toFixed(1)} ms (95%: ${percentile(redrawDurations, 0.95).toFixed(1)} ms)`
+          fps: (1000 * nbOfFrames) / (time - startTime),
+          redraw: averageRedrawDuration,
+          redraw95: percentile(redrawDurations, 0.95)
         });
 
         return;
@@ -974,6 +979,77 @@ const runBenchmark = async (): Promise<void> => {
   benchmarking.value = false;
 };
 
+// Our benchmark API, i.e. what our benchmark script (see scripts/benchmark.ts) uses to run our benchmark for a given
+// scenario, i.e. to set up our demo, wait for our data to be generated and drawn, run our benchmark, and report its
+// results.
+// Note: if our data doesn't need to be generated again (e.g., if only our renderer is different), then we show it
+//       again (i.e. we recreate our instances), so that our time to first draw is for the given scenario too.
+
+const nextFrameUntil = (condition: () => boolean): Promise<void> => {
+  return new Promise((resolve) => {
+    const check = (): void => {
+      if (condition()) {
+        resolve();
+      } else {
+        requestAnimationFrame(check);
+      }
+    };
+
+    check();
+  });
+};
+
+const demoBenchmark: DemoBenchmark = {
+  run: async (scenario: BenchmarkScenario): Promise<BenchmarkReport> => {
+    if (!(scenario.kind in DATA_KINDS)) {
+      throw new Error(`Unknown kind of data: ${scenario.kind}.`);
+    }
+
+    if (tooManyPoints(scenario.instances, scenario.traces, scenario.points)) {
+      throw new Error(`Too many points (more than ${formatNumber(MAX_TOTAL_NB_OF_POINTS)}).`);
+    }
+
+    stopBenchmark();
+
+    live.value = false;
+    kind.value = scenario.kind;
+    nbOfTraces.value = scenario.traces;
+    nbOfPoints.value = scenario.points;
+    nbOfInstances.value = scenario.instances;
+    renderer.value = scenario.renderer;
+
+    await vue.nextTick();
+
+    if (firstDrawStatus.value) {
+      datasets.value = [];
+
+      await nextPaint();
+
+      showData();
+    }
+
+    await nextFrameUntil(() => firstDrawStatus.value !== '');
+    await delay(BENCHMARK_RESET_DELAY);
+    await runBenchmark();
+
+    if (BENCHMARK_INTERACTIONS.some(([name]) => !benchmarkResults.value[name])) {
+      throw new Error('The benchmark got stopped.');
+    }
+
+    updateDrawingStatus();
+
+    return { results: benchmarkResults.value, drawnUsing: activeRenderers.value, firstDraw: firstDrawTime };
+  }
+};
+
+vue.onMounted(() => {
+  (window as unknown as { demoBenchmark?: DemoBenchmark }).demoBenchmark = demoBenchmark;
+});
+
+vue.onBeforeUnmount(() => {
+  delete (window as unknown as { demoBenchmark?: DemoBenchmark }).demoBenchmark;
+});
+
 // Loss of our WebGL context, which we restore after a while, so that we can see our instances fall back to drawing
 // their traces using Canvas 2D (or not at all if our renderer is WebGL) and then use WebGL again (see webgl.ts).
 
@@ -1036,19 +1112,18 @@ const onCsvExport = (event: PlotCsvExportEvent): void => {
 const benchmarkRows = vue.computed(() => {
   // The results of our benchmark (see above), i.e. our frame rate and redraw time for each of our interactions.
 
-  const interactions: [name: string, label: string][] = [
-    ['zoom', 'Zoom'],
-    ...BENCHMARK_PAN_ZOOMS.map((zoom): [string, string] => [`pan${zoom}`, `Pan (${zoom}×)`]),
-    ['live', 'Live'],
-    ['resize', 'Resize']
-  ];
-
-  return interactions.flatMap(([name, label]) => {
+  return BENCHMARK_INTERACTIONS.flatMap(([name, label]) => {
     const result = benchmarkResults.value[name];
 
     return [
-      { term: `${label} benchmark`, value: result?.fps ?? (benchmarkInteraction.value === name ? 'Running...' : '') },
-      { term: `${label} redraw`, value: result?.redraw ?? '' }
+      {
+        term: `${label} benchmark`,
+        value: result ? `${Math.round(result.fps)} FPS` : benchmarkInteraction.value === name ? 'Running...' : ''
+      },
+      {
+        term: `${label} redraw`,
+        value: result ? `${result.redraw.toFixed(1)} ms (95%: ${result.redraw95.toFixed(1)} ms)` : ''
+      }
     ];
   });
 });

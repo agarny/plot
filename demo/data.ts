@@ -7,11 +7,13 @@ import type { PlotData, PlotTrace } from '../index';
 //  - gaps: sine waves with some non-finite values, i.e. gaps that must be drawn as such (and which prevent level of
 //    detail from being used for the visible points that contain them);
 //  - unsorted: Lissajous curves, i.e. X values that are not sorted (so neither the culling of invisible points nor
-//    level of detail can be used);
+//    the column level of detail can be used, but the path level of detail can);
+//  - unsortedNoisy: Lissajous curves with some noise, i.e. the worst case for drawing many unsorted points (since
+//    the path level of detail can hardly simplify them);
 //  - largeOffsets: sine waves with timestamp-like X values and large Y values, i.e. values that WebGL (and its 32-bit
 //    floats) cannot draw precisely once zoomed in a lot, in which case Canvas 2D gets used instead.
 
-export type DataKind = 'smooth' | 'noisy' | 'steps' | 'gaps' | 'unsorted' | 'largeOffsets';
+export type DataKind = 'smooth' | 'noisy' | 'steps' | 'gaps' | 'unsorted' | 'unsortedNoisy' | 'largeOffsets';
 
 export const DATA_KINDS: Record<DataKind, string> = {
   smooth: 'Smooth',
@@ -19,6 +21,7 @@ export const DATA_KINDS: Record<DataKind, string> = {
   steps: 'Steps',
   gaps: 'Gaps',
   unsorted: 'Unsorted X',
+  unsortedNoisy: 'Unsorted X (noisy)',
   largeOffsets: 'Large offsets'
 };
 
@@ -118,17 +121,25 @@ const yValues = (kind: DataKind, nbOfPoints: number, phase: number, seed: number
   return res;
 };
 
-const lissajousValues = (nbOfPoints: number, phase: number, scale: number): [Float64Array, Float64Array] => {
-  // Return the X and Y values of a Lissajous curve (with its Y values scaled by the given scale), i.e. a curve which X
-  // values are not sorted.
+const lissajousValues = (
+  kind: DataKind,
+  nbOfPoints: number,
+  phase: number,
+  seed: number,
+  scale: number
+): [Float64Array, Float64Array] => {
+  // Return the X and Y values of a Lissajous curve (with its Y values scaled by the given scale and, if needed, some
+  // noise), i.e. a curve which X values are not sorted.
 
   const x = new Float64Array(nbOfPoints);
   const y = new Float64Array(nbOfPoints);
   const angleStep = (2 * Math.PI) / Math.max(1, nbOfPoints - 1);
+  const nextRandom = random(seed);
+  const noise = kind === 'unsortedNoisy' ? 0.3 : 0;
 
   for (let i = 0; i < nbOfPoints; ++i) {
-    x[i] = Math.sin(3 * i * angleStep + phase);
-    y[i] = scale * Math.sin(4 * i * angleStep);
+    x[i] = Math.sin(3 * i * angleStep + phase) + noise * (nextRandom() - 0.5);
+    y[i] = scale * (Math.sin(4 * i * angleStep) + noise * (nextRandom() - 0.5));
   }
 
   return [x, y];
@@ -140,6 +151,7 @@ const AXIS_TITLES: Record<DataKind, [x: string, y: string]> = {
   steps: ['Time (<i>s</i>)', 'Level'],
   gaps: ['Time (<i>s</i>)', 'Signal'],
   unsorted: ['sin(3<i>t</i>)', 'sin(4<i>t</i>)'],
+  unsortedNoisy: ['sin(3<i>t</i>)', 'sin(4<i>t</i>)'],
   largeOffsets: ['Time since 1970 (<i>s</i>)', 'Signal']
 };
 
@@ -150,7 +162,7 @@ export const plotData = (kind: DataKind, nbOfTraces: number, nbOfPoints: number,
   // have different natural margins (see our shared margins in App.vue).
   // Note: our traces share their X values, if possible, to save memory.
 
-  const x = kind === 'unsorted' ? undefined : xValues(kind, nbOfPoints);
+  const x = kind === 'unsorted' || kind === 'unsortedNoisy' ? undefined : xValues(kind, nbOfPoints);
   const scale = 10 ** (instance % NB_OF_SCALES);
   const traces: PlotTrace[] = [];
 
@@ -158,7 +170,7 @@ export const plotData = (kind: DataKind, nbOfTraces: number, nbOfPoints: number,
     const phase = (2 * Math.PI * i) / nbOfTraces + 0.37 * instance;
     const [traceX, traceY] = x
       ? [x, yValues(kind, nbOfPoints, phase, 1000 * instance + i, scale)]
-      : lissajousValues(nbOfPoints, phase, scale);
+      : lissajousValues(kind, nbOfPoints, phase, 1000 * instance + i, scale);
     const name = `Trace #${i + 1}`;
 
     traces.push({ name, xValue: 'x', x: traceX, yValue: name, y: traceY, color: traceColor(i) });

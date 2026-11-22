@@ -10,7 +10,7 @@ Key characteristics:
 Contents:
 - [Installation](#installation)
 - [Usage](#usage): [Types](#types), [Data](#data), [Large and live data](#large-and-live-data), [Props](#props), [Events](#events), [Properties](#properties), [Methods](#methods), [Interaction](#interaction), and [Theming](#theming)
-- [Development](#development): [Releasing](#releasing)
+- [Development](#development): [Benchmarking](#benchmarking) and [Releasing](#releasing)
 - [License](#license)
 
 ## Installation
@@ -229,9 +229,40 @@ bun clean            # Remove all generated files.
 ```
 
 ```bash
+bun benchmark            # Benchmark the plot (see below).
 bun dependencies:update  # Check for and update outdated dependencies.
 bun version:new          # Bump the version number.
 ```
+
+### Benchmarking
+
+`bun benchmark` builds the demo app, serves it, and runs its benchmark (i.e. what its **Benchmark** button does) in one or more browsers, for a set of scenarios and renderers. Its results get saved as a report in `benchmark-results/`, named after when the benchmark was run, as HTML (to be opened in a browser), Markdown (e.g., to be pasted in an issue), and JSON (e.g., to be compared with other results). The report is updated as results come in, so it is there even if the benchmark gets interrupted.
+
+```bash
+bun benchmark                                       # All the browsers and scenarios, Canvas 2D and WebGL.
+bun benchmark --browsers chrome                     # Only Chrome.
+bun benchmark --scenarios noisy-3x1m,unsorted-3x1m  # Only some scenarios (see bun benchmark --list).
+bun benchmark --renderers auto                      # Only what 'auto' uses.
+bun benchmark --output ~/results                    # Save the report somewhere else.
+bun benchmark --help                                # All the options.
+```
+
+Requirements:
+- **Chrome and Firefox:** they must be installed, and are driven using [Puppeteer](https://pptr.dev/). Chrome runs headless (unless `--headed` is given), but a Firefox window opens, since headless Firefox doesn't draw using the GPU and caps its frame rate.
+- **Safari** (macOS only): it is driven using `safaridriver`, which must be enabled once, using `safaridriver --enable` and Safari's **Develop › Allow Remote Automation** menu item (the **Develop** menu can be shown in Safari's **Advanced** settings). A Safari window opens.
+- **Browsers:** by default, Chrome, Firefox, and (on macOS) Safari are used, skipping those that cannot be launched (e.g., if they are not installed).
+- **Time:** each scenario takes about 40 seconds per renderer, so all of them take about 20 minutes per browser with two renderers (i.e. about an hour for all three browsers). Don't use the computer in the meantime, since it would affect the results. On macOS, the benchmark keeps the display on while it runs (browsers stop drawing when the display is off), and refuses to start if the screen is locked.
+
+A scenario is a kind of data (e.g., `noisy` sine waves or `unsorted` Lissajous curves, like in the demo app) with a number of plots, traces, and points (e.g., `noisy-16-plots-3x100k` is 16 plots of 3 noisy traces of 100,000 points). For each scenario and renderer, the benchmark zooms the plots in and out, pans them at a zoom of 1×, 10×, and 100× (the more zoomed in, the fewer the visible points), plots their data live (as if it was being generated), and resizes them, each for 5 seconds.
+
+Reading the results:
+- **Header:** each table is preceded by the browser's version, the GPU, and the device pixel ratio.
+- **Cells:** the frame rate, and the average and 95th percentile of the redraw time (e.g., `800 FPS, 1.2/2.0 ms`). For each scenario and interaction, the renderer that did best is highlighted: the one with the highest frame rate if it is not capped, or the one with the lowest redraw time otherwise. The redraw time is the time it takes to redraw all the plots in a frame, including the browser rendering the frame. The lower, the better, and a 95th percentile much higher than the average means occasional stutters. At 60 Hz, a frame lasts 16.7 ms.
+- **Frame rate:** in Chrome and Firefox, it is not capped by the refresh rate of the display (unless `--capped` is given), so it tells how fast the plots can be redrawn, including WebGL's GPU time, which the redraw time doesn't fully include (since WebGL draws asynchronously). In Safari (or with `--capped`), it is capped by the refresh rate of the display, so compare redraw times instead.
+- **Drawn using:** what the traces were actually drawn using (e.g., WebGL hands over to Canvas 2D when it is not precise enough, which may be the case for `large-offsets-3x1m` when zoomed in a lot).
+- **First draw:** the time from giving the data to the plots to them having drawn it, which includes creating the plots, processing the data, and building the levels of detail (and uploading the data to the GPU, for WebGL).
+
+The results depend on the computer, the browser (and its version), and the display, so only compare results from the same computer. To measure the effect of a change, run the same scenarios before and after it.
 
 ### Releasing
 
