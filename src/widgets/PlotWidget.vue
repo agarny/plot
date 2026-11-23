@@ -4838,8 +4838,10 @@ const gpuFrameItemsOf = (u: uPlot): GpuPlotItem[] => {
 //    (e.g., a phase plot, 3 to 5 times faster), but WebGL is faster when many points need to be stroked, from about
 //    300,000 points between our traces, e.g. traces that are too short for our level of detail to be used (e.g., 1.7
 //    to 5 times faster for 30 to 100 traces of 10,000 points) or a noisy trace which X values are not sorted;
-//  - Safari: like Chrome, except that WebGL is even faster whenever Canvas 2D needs to stroke many points (e.g., 3.5
-//    to 24 times faster for 100 traces of 10,000 points); and
+//  - Safari: like Chrome, except that WebGL is even faster whenever Canvas 2D needs to stroke many points, from about
+//    100,000 points between our traces (e.g., 1.3 to 3.8 times faster for 100 traces of 1,000 points, and 3.5 to 24
+//    times faster for 100 traces of 10,000 points). For 30 traces of 1,000,000 points, Canvas 2D is up to 1.3 times
+//    faster when they are all visible, but WebGL is up to 5.7 times faster when zoomed in; and
 //  - Firefox: Canvas 2D takes a very long time to stroke a dense trace that goes up and down (e.g., noisy data), which
 //    nothing on our side can avoid (we tried using different line joins, stroking a trace in chunks, and drawing it
 //    as rectangles), so WebGL is much faster for such traces (e.g., 130 to 700 FPS against 5 to 10 FPS when panning
@@ -4848,18 +4850,28 @@ const gpuFrameItemsOf = (u: uPlot): GpuPlotItem[] => {
 //    which are slow either way), while Canvas 2D can be extremely slow, and telling smooth traces from noisy ones
 //    beforehand would only be a heuristic.
 // So, we use Canvas 2D in browsers other than Firefox, unless it would need to stroke at least
-// AUTO_WEBGL_MIN_CANVAS_POINTS points for our visible traces, i.e. all the points of a trace, unless our level of
-// detail is used for it (see linearPathPoints()), in which case at most AUTO_CANVAS_POINTS_PER_COLUMN points per column
-// if its X values are sorted, or the points of the level of our path level of detail that would be used otherwise.
+// AUTO_WEBGL_MIN_CANVAS_POINTS points (AUTO_SAFARI_WEBGL_MIN_CANVAS_POINTS in Safari, as well as in any other browser
+// on iOS and iPadOS, since they all use WebKit) for our visible traces, i.e. all the points of a trace, unless our
+// level of detail is used for it (see linearPathPoints()), in which case at most AUTO_CANVAS_POINTS_PER_COLUMN points
+// per column if its X values are sorted, or the points of the level of our path level of detail that would be used
+// otherwise.
 // Note: we only check whether the X values of a trace are sorted (using its level of detail, see
 //       levelOfDetailUtils.ts) if our visible traces have enough points between them for it to matter, so that we
 //       don't create a level of detail for a trace that doesn't otherwise need one. Also, our path level of detail is
 //       the one that Canvas 2D uses, so we only build it once, whichever renderer we end up using.
 
 const AUTO_WEBGL_MIN_CANVAS_POINTS = 300000;
+const AUTO_SAFARI_WEBGL_MIN_CANVAS_POINTS = 100000;
 const AUTO_CANVAS_POINTS_PER_COLUMN = 4; // First, minimum, maximum, and last points of a column (see linearPath()).
 
-const isFirefox = typeof navigator !== 'undefined' && navigator.userAgent.includes('Firefox/');
+const userAgent = typeof navigator !== 'undefined' ? navigator.userAgent : '';
+const isFirefox = userAgent.includes('Firefox/');
+const isSafari =
+  userAgent.includes('Safari/') &&
+  !userAgent.includes('Chrome/') &&
+  !userAgent.includes('Chromium/') &&
+  !userAgent.includes('Android');
+const autoWebglMinCanvasPoints = isSafari ? AUTO_SAFARI_WEBGL_MIN_CANVAS_POINTS : AUTO_WEBGL_MIN_CANVAS_POINTS;
 
 const useCanvas2D = (u: uPlot): boolean => {
   // Return whether our traces are to be drawn using Canvas 2D rather than WebGL (see above).
@@ -4896,7 +4908,7 @@ const useCanvas2D = (u: uPlot): boolean => {
     }
   }
 
-  if (nbOfPoints < AUTO_WEBGL_MIN_CANVAS_POINTS) {
+  if (nbOfPoints < autoWebglMinCanvasPoints) {
     return true;
   }
 
@@ -4919,7 +4931,7 @@ const useCanvas2D = (u: uPlot): boolean => {
     }
   }
 
-  return nbOfCanvasPoints < AUTO_WEBGL_MIN_CANVAS_POINTS;
+  return nbOfCanvasPoints < autoWebglMinCanvasPoints;
 };
 
 const prepareFrame = (u: uPlot): void => {
