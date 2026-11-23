@@ -1,5 +1,5 @@
 // Incremental processing of the values of our traces (see PlotWidget.vue).
-// Note: our data gets may get updated often (e.g., many times a second while a simulation is running), and typically
+// Note: our data may get updated often (e.g., many times a second while a simulation is running), and typically
 //       with a few more values each time. So, rather than process all of our values every time, we check whether they
 //       are a continuation of the values we processed before (i.e. a view of the same buffer, from the same offset, and
 //       at least as long), in which case we assume that only their last value onwards may have changed (e.g., live data

@@ -1,7 +1,7 @@
 // The path level of detail of a trace, i.e. the points of a trace that we need to draw so that it looks the same (give
 // or take a fraction of a pixel) as if all of its points were drawn, whether or not its X values are sorted (e.g., a
-// phase plot). This complements our (column) level of detail (see levelOfDetailUtils.ts), which is exact, but which
-// requires sorted X values.
+// phase plot). This complements our (column) level of detail (see levelOfDetailUtils.ts), which is (nearly) exact, but
+// which requires sorted X values.
 // Note #1: we simplify our path at different levels: level k has a tolerance of XSize / 4^k along the X axis and of
 //          YSize / 4^k along the Y axis, where XSize (and YSize) is the smallest power of two that is at least as big
 //          as the range of our X (and Y) values. (Our tolerances get four, rather than two, times smaller from one
@@ -318,7 +318,9 @@ export const update = (lod: PathLevelOfDetail, xValues: Float64Array, yValues: F
   // Take the given points into account, from the first one that may have changed since we were last updated (see Note
   // #8 above), or that we haven't taken into account (see invalidate()), i.e. make sure that our sizes are big enough
   // for them, and rebuild our levels otherwise (see Note #6 above).
-  // Note: our levels themselves only get updated when they are needed (see Note #5 above and updatedLevel()).
+  // Note #1: our levels themselves only get updated when they are needed (see Note #5 above and updatedLevel()).
+  // Note #2: the given number of points must not be smaller than the one we were last updated with for the same values
+  //          (e.g., it is the length of the given values), since we would then keep our points beyond it.
 
   if (xValues !== lod.xValues || yValues !== lod.yValues) {
     invalidate(

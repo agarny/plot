@@ -234,7 +234,7 @@ export interface PlotPointCounts {
 // memoryUsage(). This is mainly meant for testing and benchmarking.
 
 export interface PlotMemoryUsage {
-  levelOfDetail: number; // Our levels of detail and our Canvas 2D selection.
+  levelOfDetail: number; // Our levels of detail and the buffers of their selected points.
   logValues: number; // The decimal logarithm of our values along our logarithmic axes (see plotValues()).
 }
 
@@ -414,7 +414,7 @@ const pointCounts = (): PlotPointCounts => {
     const nbOfPoints = Math.min(xValues.length, yValues.length);
 
     res.nbOfPoints += nbOfPoints;
-    res.nbOfDrawnPoints += hasMarkers(xValues, yValues) ? nbOfPoints : (canvasDrawnPoints[seriesIndex - 1] ?? 0);
+    res.nbOfDrawnPoints += hasMarkers(xValues, yValues) ? nbOfPoints : (drawnPoints[seriesIndex - 1] ?? 0);
   }
 
   return res;
@@ -428,7 +428,7 @@ const memoryUsage = (): PlotMemoryUsage => {
   //          instances (see linearPaths() and strokeOutlineUtils.ts).
 
   const res: PlotMemoryUsage = {
-    levelOfDetail: canvasSelectionXValues.byteLength + canvasSelectionYValues.byteLength,
+    levelOfDetail: selectionXValues.byteLength + selectionYValues.byteLength,
     logValues: 0
   };
 
@@ -590,6 +590,23 @@ const themeColors: ThemeColors = {
 
 const resolvedColor = (color: string): string => {
   return common.cssColor(color, mainDivRef.value ?? document.documentElement);
+};
+
+// The theme colours that we draw on uPlot's canvas, which we resolve once per draw (see resolveCanvasColors()) rather
+// than every time that we need them, since resolving a colour calls getComputedStyle().
+
+const canvasColors = {
+  grid: '',
+  zeroLine: '',
+  tickLabel: ''
+};
+
+const resolveCanvasColors = (): void => {
+  // Note: this gets called before our plot gets drawn (see the drawClear hook in createPlot()).
+
+  canvasColors.grid = resolvedColor(themeColors.grid);
+  canvasColors.zeroLine = resolvedColor(themeColors.zeroLine);
+  canvasColors.tickLabel = resolvedColor(themeColors.tickLabel);
 };
 
 // Our traces' visibility, which we keep track of across data updates (e.g., while a simulation is running or when runs
@@ -3958,7 +3975,7 @@ const drawTickLabels = (u: uPlot): void => {
   context.save();
 
   context.font = `${Math.round(TICK_FONT_SIZE * area.pxRatio)}px ${fontFamily}`;
-  context.fillStyle = resolvedColor(themeColors.tickLabel);
+  context.fillStyle = canvasColors.tickLabel;
   context.textBaseline = 'alphabetic';
 
   for (const tickLabel of tickLabels(u, area)) {
@@ -4252,7 +4269,7 @@ const drawZeroLines = (u: uPlot): void => {
   // Like Plotly, draw our zero lines.
   // Note: this gets called after uPlot draws our grid lines and before it draws our traces.
 
-  drawLines(u, resolvedColor(themeColors.zeroLine), zeroLines('x'), zeroLines('y'));
+  drawLines(u, canvasColors.zeroLine, zeroLines('x'), zeroLines('y'));
 };
 
 // Traces and markers.
@@ -4327,37 +4344,34 @@ const linearPath = (
     }
 
     // Draw the minimum and maximum points of our current column in their original order.
+    // Note: we don't use any helper function here since this gets called for (almost) every point of a noisy trace
+    //       which X values are not sorted, and creating those functions every time would make linearPath() up to about
+    //       twice as slow.
 
+    const minIsFirst = minIndex < maxIndex;
     let drawnXPos = firstXPos;
     let drawnYPos = firstYPos;
 
-    const drawTo = (xPos: number, yPos: number): void => {
-      if (xPos !== drawnXPos || yPos !== drawnYPos) {
-        path.lineTo(xPos, yPos);
+    for (let k = 0; k < 2; ++k) {
+      const index = (k === 0) === minIsFirst ? minIndex : maxIndex;
 
-        drawnXPos = xPos;
-        drawnYPos = yPos;
-      }
-    };
-
-    const drawPoint = (index: number, xPos: number, yPos: number): void => {
       if (index !== firstIndex && index !== lastIndex) {
-        drawTo(xPos, yPos);
-      }
-    };
+        const xPos = index === minIndex ? minXPos : maxXPos;
+        const yPos = index === minIndex ? minYPos : maxYPos;
 
-    if (minIndex < maxIndex) {
-      drawPoint(minIndex, minXPos, minYPos);
-      drawPoint(maxIndex, maxXPos, maxYPos);
-    } else {
-      drawPoint(maxIndex, maxXPos, maxYPos);
-      drawPoint(minIndex, minXPos, minYPos);
+        if (xPos !== drawnXPos || yPos !== drawnYPos) {
+          path.lineTo(xPos, yPos);
+
+          drawnXPos = xPos;
+          drawnYPos = yPos;
+        }
+      }
     }
 
     // Draw the last point of our current column.
 
-    if (lastIndex !== firstIndex) {
-      drawTo(lastXPos, lastYPos);
+    if (lastIndex !== firstIndex && (lastXPos !== drawnXPos || lastYPos !== drawnYPos)) {
+      path.lineTo(lastXPos, lastYPos);
     }
 
     // Reset our state so that we start a new column with the next point.
@@ -4471,14 +4485,17 @@ const linearPath = (
   drawColumn();
 };
 
-// Level of detail for Canvas 2D.
+// Level of detail.
 // Note #1: linearPath() only draws the first, minimum, maximum, and last points of each pixel column, but it still has
 //          to go through all the points of our trace to find them, i.e. it costs O(number of points). So, if the X
 //          values of our trace are sorted and it has many more visible points than there are pixel columns, then we
 //          first select those points using our level of detail (see levelOfDetailUtils.ts), which costs O(number of
 //          pixel columns), and only give them to linearPath().
 // Note #2: our columns are our pixel columns (i.e. those of linearPath()), so our selected points include all the
-//          points that linearPath() would draw, i.e. our trace looks exactly the same.
+//          points that linearPath() would draw, i.e. our trace looks the same. The only exception is a pixel column in
+//          which our trace goes beyond the top or bottom edge of our plotting area, since linearPath() then breaks our
+//          path at points that we may not have selected, which may shift what gets drawn in that pixel column by a
+//          fraction of a pixel.
 // Note #3: we keep our level of detail up to date incrementally (see traceValues.ts).
 // Note #4: the level of detail of a trace is shared with our hover (see hoveredIndex()), so that it doesn't need its
 //          own (and therefore more memory). It keeps track of the values that it was last updated with (see Note #8 of
@@ -4500,8 +4517,8 @@ interface LinearPathPoints {
   index1: number; // Index of the last point (included) to give to linearPath().
 }
 
-let traceLods: levelOfDetailUtils.LevelOfDetail[] = [];
-let pathLods: pathLevelOfDetailUtils.PathLevelOfDetail[] = [];
+const traceLods: levelOfDetailUtils.LevelOfDetail[] = [];
+const pathLods: pathLevelOfDetailUtils.PathLevelOfDetail[] = [];
 
 const updatedTraceLod = (
   traceIndex: number,
@@ -4539,7 +4556,7 @@ const updatedPathLod = (
   return lod;
 };
 
-const canvasPathLevel = (
+const selectedPathLevel = (
   traceIndex: number,
   xValues: Float64Array,
   yValues: Float64Array,
@@ -4558,10 +4575,10 @@ const canvasPathLevel = (
   );
 };
 
-let canvasSelectionXValues = new Float64Array(0);
-let canvasSelectionYValues = new Float64Array(0);
+let selectionXValues = new Float64Array(0);
+let selectionYValues = new Float64Array(0);
 
-const canvasSelection = (
+const selectionPoints = (
   xValues: Float64Array,
   yValues: Float64Array,
   indices: Int32Array,
@@ -4569,21 +4586,21 @@ const canvasSelection = (
 ): LinearPathPoints => {
   // Return the given points of the given trace, so that they can be given to linearPath().
 
-  if (canvasSelectionXValues.length < nbOfPoints) {
-    canvasSelectionXValues = new Float64Array(indices.length);
-    canvasSelectionYValues = new Float64Array(indices.length);
+  if (selectionXValues.length < nbOfPoints) {
+    selectionXValues = new Float64Array(indices.length);
+    selectionYValues = new Float64Array(indices.length);
   }
 
   for (let i = 0; i < nbOfPoints; ++i) {
     const index = indices[i] as number;
 
-    canvasSelectionXValues[i] = xValues[index] as number;
-    canvasSelectionYValues[i] = yValues[index] as number;
+    selectionXValues[i] = xValues[index] as number;
+    selectionYValues[i] = yValues[index] as number;
   }
 
   return {
-    xValues: canvasSelectionXValues,
-    yValues: canvasSelectionYValues,
+    xValues: selectionXValues,
+    yValues: selectionYValues,
     index0: 0,
     index1: nbOfPoints - 1
   };
@@ -4598,7 +4615,7 @@ const linearPathPoints = (
   area: PathArea
 ): LinearPathPoints => {
   // Return the points of the given trace that linearPath() needs to go through (see Note #1 above), i.e. all of them if
-  // we are not to use our level of detail (see Note #4 of our props).
+  // we are not to use our level of detail (see Note #3 of our props).
 
   const res: LinearPathPoints = { xValues, yValues, index0, index1 };
   const count = Math.min(xValues.length, yValues.length);
@@ -4618,37 +4635,60 @@ const linearPathPoints = (
   // values are not sorted (see Note #5 above).
 
   if (lod.sortedLength < count) {
-    const level = canvasPathLevel(seriesIndex - 1, xValues, yValues, count, area);
+    const level = selectedPathLevel(seriesIndex - 1, xValues, yValues, count, area);
 
-    return level ? canvasSelection(xValues, yValues, level.indices, level.count) : res;
+    return level ? selectionPoints(xValues, yValues, level.indices, level.count) : res;
   }
 
   // Only go through our visible points, if our X values are sorted.
+  // Note: linearPath() draws the points that are within its margin (i.e. our line width) of our plotting area, since
+  //       part of what they draw can be seen, so we must go through them too.
 
-  const [start, end] = levelOfDetailUtils.visibleRange(lod, xValues, yValues, count, area.xMin, area.xMax);
+  const margin = LINE_WIDTH * area.pxRatio;
+  const xMargin = margin / xFactor;
+  const [start, end] = levelOfDetailUtils.visibleRange(
+    lod,
+    xValues,
+    yValues,
+    count,
+    area.xMin - xMargin,
+    area.xMax + xMargin
+  );
 
   res.index0 = start;
   res.index1 = end - 1;
 
   // Only go through the points that linearPath() would draw, if we have many visible points.
   // Note: linearPath() rounds the X position of a point to determine its pixel column, so our columns start half a
-  //       pixel before the pixel column of the left edge of our plotting area.
+  //       pixel before the pixel column of the left edge of our plotting area, less the columns that cover the margin
+  //       of linearPath() (and likewise after its right edge).
 
   if (end - start <= minNbOfPoints) {
     return res;
   }
 
-  const xMin = area.xMin + (Math.round(area.left) - 0.5 - area.left) / xFactor;
-  const xMax = xMin + nbOfColumns / xFactor;
-  const selection = levelOfDetailUtils.selectPoints(lod, xValues, yValues, start, end, xMin, xMax, nbOfColumns);
+  const nbOfMarginColumns = Math.ceil(margin) + 1;
+  const nbOfSelectionColumns = nbOfColumns + 2 * nbOfMarginColumns;
+  const xMin = area.xMin + (Math.round(area.left) - 0.5 - area.left - nbOfMarginColumns) / xFactor;
+  const xMax = xMin + nbOfSelectionColumns / xFactor;
+  const selection = levelOfDetailUtils.selectPoints(
+    lod,
+    xValues,
+    yValues,
+    start,
+    end,
+    xMin,
+    xMax,
+    nbOfSelectionColumns
+  );
 
-  return canvasSelection(xValues, yValues, selection.indices, selection.nbOfPoints);
+  return selectionPoints(xValues, yValues, selection.indices, selection.nbOfPoints);
 };
 
-// The number of points that we went through for each of our traces the last time that we built its path using Canvas
-// 2D (see linearPaths() and pointCounts()).
+// The number of points that we went through for each of our traces the last time that we built its path (see
+// linearPaths() and pointCounts()).
 
-let canvasDrawnPoints: number[] = [];
+const drawnPoints: number[] = [];
 
 // In Firefox, we fill the outline of the stroke of a trace rather than stroke it (see strokeOutlineUtils.ts) if its
 // path has more than OUTLINE_MIN_POINTS points, is dense (i.e. goes up and down by at least OUTLINE_MIN_TRAVEL line
@@ -4707,7 +4747,7 @@ const linearPaths: uPlot.Series.PathBuilder = (u: uPlot, seriesIndex: number, in
     nbOfDrawnPoints = Math.max(0, lastIndex - points.index0 + 1);
   }
 
-  canvasDrawnPoints[seriesIndex - 1] = nbOfDrawnPoints;
+  drawnPoints[seriesIndex - 1] = nbOfDrawnPoints;
 
   // Fill our outline, if we have one, using the colour of our trace, which uPlot uses rather than the fill style of our
   // series (see drawPath() in uPlot). Otherwise, stroke our path.
@@ -4761,14 +4801,16 @@ const markerPaths: uPlot.Series.Points.PathBuilder = (u: uPlot, seriesIndex: num
   return { stroke: null, fill, clip, flags: 0 };
 };
 
-const forgetRemovedTraces = (u: uPlot): void => {
+const forgetRemovedTraces = (nbOfTraces: number): void => {
   // Forget about the levels of detail and hover searches of the traces that we don't have anymore (e.g., if our data
-  // now has fewer traces), so that they don't keep using memory.
-  // Note: this gets called before our plot gets drawn (see the drawClear hook in createPlot()).
+  // now has fewer traces, or none at all), so that they don't keep using memory (and a reference to our old data).
+  // Note: this gets called whenever our data gets updated (see plotData()).
 
-  pathLods = pathLods.slice(0, u.series.length - 1);
-  traceLods = traceLods.slice(0, u.series.length - 1);
-  hoverSearches = hoverSearches.slice(0, u.series.length - 1);
+  for (const array of [pathLods, traceLods, hoverSearches, drawnPoints]) {
+    if (array.length > nbOfTraces) {
+      array.length = nbOfTraces;
+    }
+  }
 };
 
 // The last point of our visible traces when our data is live (e.g., while a simulation is running), which is shown
@@ -4903,7 +4945,7 @@ interface HoverSearch {
   distance: number; // Its distance from the mouse pointer (or HOVER_DISTANCE if there is no closest point).
 }
 
-let hoverSearches: (HoverSearch | undefined)[] = [];
+const hoverSearches: (HoverSearch | undefined)[] = [];
 
 const hoveredIndex = (
   traceIndex: number,
@@ -5306,9 +5348,11 @@ const plotValues = (
 };
 
 const plotData = (): uPlot.AlignedData => {
-  // Return the data to be plotted, i.e. the values that we plot for our traces (see plotValues()).
-  // Note #1: we also keep track of whether the X values of our traces are sorted (see updateHover()).
-  // Note #2: uPlot needs at least one series, hence we use an empty one if we have no traces.
+  // Return the data to be plotted, i.e. the values that we plot for our traces (see plotValues()), forgetting about the
+  // traces that we don't have anymore (see forgetRemovedTraces()).
+  // Note: uPlot needs at least one series, hence we use an empty one if we have no traces.
+
+  forgetRemovedTraces(props.data.traces.length);
 
   const arrays: Record<AxisKey, PlottedArrays> = { x: new Map(), y: new Map() };
 
@@ -5351,6 +5395,11 @@ const createPlot = (width: number, height: number): void => {
       alpha: seriesAlpha(i),
       stroke: (_plot: uPlot, seriesIndex: number) => seriesColor(seriesIndex),
       width: LINE_WIDTH,
+      // Note: uPlot shifts the path of a trace by up to half a canvas pixel if its line width is not an even number of
+      //       canvas pixels (e.g., by half a canvas pixel with a device pixel ratio of 1.5), since its own path
+      //       builders round the position of points to whole canvas pixels. Our path builders don't (and neither do our
+      //       hover, live points, markers, and exports), so we don't want our traces to be shifted.
+      pxAlign: 0,
       paths: linearPaths,
       points: {
         show: seriesHasMarkers,
@@ -5368,12 +5417,14 @@ const createPlot = (width: number, height: number): void => {
 
   // Create our plot.
 
-  // Note: our axis colours are resolved whenever our plot gets drawn, like our other colours (e.g., see
-  //       drawZeroLines()), so that they follow the CSS variables of our theme (e.g., if they get changed on one of our
-  //       ancestors).
+  // Note #1: uPlot uses the stroke of an axis for its tick labels and title, which we draw ourselves (see
+  //          drawTickLabels() and our template), so it never gets to draw anything with it.
+  // Note #2: our grid colour is resolved whenever our plot gets drawn, like our other colours (see
+  //          resolveCanvasColors()), so that it follows the CSS variables of our theme (e.g., if they get changed on
+  //          one of our ancestors).
 
   const axis: uPlot.Axis = {
-    stroke: () => resolvedColor(themeColors.text),
+    stroke: 'transparent',
     font: tickFont(),
     labelFont: `${TITLE_FONT_SIZE}px ${fontFamily}`,
     labelGap: 0,
@@ -5382,7 +5433,7 @@ const createPlot = (width: number, height: number): void => {
       show: false
     },
     grid: {
-      stroke: () => resolvedColor(themeColors.grid),
+      stroke: () => canvasColors.grid,
       width: 1
     }
   };
@@ -5459,17 +5510,18 @@ const createPlot = (width: number, height: number): void => {
       ],
       series,
       hooks: {
-        drawClear: [forgetRemovedTraces],
+        drawClear: [resolveCanvasColors],
         draw: [
           (u: uPlot) => {
             updatePlotRect(u);
             updateLivePoints(u);
             updateMarginsAsync();
 
-            // Update our hover tooltip, if any, since our plot may have changed (e.g., our data got updated or we
-            // zoomed in/out).
+            // Update our hover tooltip if we have one or if the mouse pointer is over our plotting area, since our
+            // plot may have changed (e.g., our data got updated or we zoomed in/out), i.e. our tooltip may have to
+            // change, disappear, or appear (e.g., when a live trace reaches the mouse pointer).
 
-            if (hover.value) {
+            if (hover.value || (u.cursor.left ?? -1) >= 0) {
               queueHoverUpdate();
             }
           }

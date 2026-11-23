@@ -139,7 +139,7 @@ Also set the [`live`](#props) prop while the data is live, so that the last poin
 | `levelOfDetail` | `boolean` | `true` | Whether to only go through the points that are needed for a trace to look the same when drawing it (see [Large and live data](#large-and-live-data)). Hovering a trace whose X values are sorted always does. Only meant to be disabled to see how much it helps. |
 | `live` | `boolean` | `false` | Whether the data is live (e.g., while a simulation is running), in which case the last point of each visible trace is marked. |
 
-To draw traces like a plain uPlot plot would, i.e. without our level of detail, use `:levelOfDetail="false"`. uPlot then draws every point of every trace on its canvas, using our path builder. Unlike uPlot's own, our path builder handles gaps (`NaN` values) and traces whose X values are not sorted (e.g., phase plots) at any number of points, and in Firefox, it fills the outline of a dense trace (e.g., noisy data) with many points rather than stroke it, since Firefox strokes such a trace very slowly. This is also the reference that our optimisations can be benchmarked against.
+To draw traces without our level of detail, use `:levelOfDetail="false"`. Our path builder then goes through every point of every trace (still only drawing the first, minimum, maximum, and last points of each pixel column, so that a trace looks the same). Unlike uPlot's own, our path builder handles gaps (`NaN` values) and traces whose X values are not sorted (e.g., phase plots) at any number of points, and in Firefox, it fills the outline of a dense trace (e.g., noisy data) with many points rather than stroke it, since Firefox strokes such a trace very slowly. This is also the reference that our optimisations can be benchmarked against.
 
 ### Events
 
@@ -182,7 +182,7 @@ Set any of these CSS variables on an ancestor of the component. Each has a light
 | Variable | Used for |
 |---|---|
 | `--opencor-plot-background` | The background of the plot. |
-| `--opencor-plot-text-color` | The axis titles and the legend. |
+| `--opencor-plot-text-color` | The axis titles, the legend, and the ring around the last point of a live trace. |
 | `--opencor-plot-muted-text-color` | Tick labels, the hover guide line, hidden traces in the legend, and secondary text in overlays. |
 | `--opencor-plot-primary-color` | The zoom box (and, by default, the keyboard focus ring). |
 | `--opencor-plot-grid-color` | Grid lines. |

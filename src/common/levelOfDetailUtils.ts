@@ -22,16 +22,16 @@
 //          gaps quickly, we skip the blocks that have no gap (when looking for the next gap) or no finite point (when
 //          looking for the next finite point). A range of points with many gaps may therefore have many selected points
 //          (e.g., all of its points if every other point is a gap), so our selection grows if needed.
-// Note #5: a path (e.g., our Canvas 2D path, see linearPath() in PlotWidget.vue) starts from its first point or from
-//          the first point after a gap, and only then starts drawing the points of a column. So, for a run of finite
-//          points that starts our selection (see selectPoints()) or that follows a gap, we select its first point and
-//          then the first, minimum, maximum, and last points of the rest of the run, so that what gets drawn is exactly
-//          the same as if all of its points were drawn.
+// Note #5: a path (e.g., that of a plot, see linearPath() in PlotWidget.vue) starts from its first point or from the
+//          first point after a gap, and only then starts drawing the points of a column. So, for a run of finite points
+//          that starts our selection (see selectPoints()) or that follows a gap, we select its first point and then the
+//          first, minimum, maximum, and last points of the rest of the run, so that what gets drawn is exactly the same
+//          as if all of its points were drawn.
 // Note #6: we keep track of the points that we last selected, and of the first point that may have changed since then.
 //          So, if a trace gets drawn for the same X range and number of columns as before (e.g., while a simulation is
 //          running, with a fixed X range), then we only select the points of the columns from the one that contains
-//          the first point that may have changed, i.e. drawing a few more points costs O(number of new points) rather
-//          than O(number of columns).
+//          the first point that may have changed, i.e. selecting our points again once a few more points have been
+//          added costs O(number of new points) rather than O(number of columns).
 // Note #7: a gap may have a non-finite X value (e.g., a logarithmic X axis and a non-positive X value), or a finite X
 //          value that is anywhere (since it doesn't get drawn), so only the X values of our finite points need to be
 //          sorted. This means that, when looking for the first point that is in a given column, we look at the first
@@ -41,10 +41,9 @@
 //          values that are not a continuation of them (see traceValues.ts), we process all of them again, and otherwise
 //          only from our last point (which may have changed), unless they are the very same values (i.e. the same
 //          arrays), which we assume haven't changed (e.g., when a plot gets redrawn without its data having changed).
-//          This matters since we may be shared (e.g., by the Canvas 2D path and the hover of a plot, see
-//          PlotWidget.vue), i.e. we may have been last updated by another of our users, and with other values (e.g., if
-//          the traces of a plot have changed in the meantime), so a user cannot rely on the values that it last updated
-//          us with.
+//          This matters since we may be shared (e.g., by the path and the hover of a plot, see PlotWidget.vue), i.e. we
+//          may have been last updated by another of our users, and with other values (e.g., if the traces of a plot
+//          have changed in the meantime), so a user cannot rely on the values that it last updated us with.
 
 import { isContinuationOf } from './traceValues';
 
@@ -193,6 +192,8 @@ export const update = (lod: LevelOfDetail, xValues: Float64Array, yValues: Float
   // or that we haven't processed (see invalidate()).
   // Note #1: our loops only use local variables, so that they are fast.
   // Note #2: we use x - x === 0 to check whether x is finite since it is faster than Number.isFinite().
+  // Note #3: the given number of points must not be smaller than the one we were last updated with for the same values
+  //          (e.g., it is the length of the given values), since we would then keep our points beyond it.
 
   if (xValues !== lod.xValues || yValues !== lod.yValues) {
     invalidate(

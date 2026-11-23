@@ -387,42 +387,42 @@ const crossingsOf = (p: number, q: number, lo: number, hi: number): number => {
     const slopeDifference = (pieceDs[p] as number) - (pieceDs[q] as number);
 
     if (slopeDifference !== 0) {
-      const x =
-        ((pieceBs[q] as number) -
-          (pieceBs[p] as number) +
-          (pieceAs[p] as number) * (pieceDs[p] as number) -
-          (pieceAs[q] as number) * (pieceDs[q] as number)) /
-        slopeDifference;
+      // Note: we solve relative to the start of line p (rather than for x), for the same reason as for an arc (below).
+
+      const ap = pieceAs[p] as number;
+      const x = ap + (value(q, ap) - (pieceBs[p] as number)) / slopeDifference;
 
       if (x > lo && x < hi) {
         crossings[res++] = x;
       }
     }
   } else {
-    // A line and an upper arc cross where (x - cx)^2 + (d x + k)^2 = r^2 (with y - cy = d x + k on our line) and
-    // y <= cy, i.e. at most twice.
+    // A line and an upper arc cross where u^2 + (d u + k)^2 = r^2 (with u = x - cx and y - cy = d u + k on our line)
+    // and y <= cy, i.e. at most twice. We solve (1 + d^2) u^2 + 2 d k u + k^2 - r^2 = 0 relative to the centre of our
+    // arc (rather than for x) since, otherwise, a steep line (i.e. a large d) far from the origin would lose most of
+    // the precision of our discriminant to cancellation (and we could miss a crossing, leaving a hole in our outline).
 
     const cx = pieceAs[q] as number;
     const d = pieceDs[p] as number;
-    const k = (pieceBs[p] as number) - (pieceAs[p] as number) * d - (pieceBs[q] as number);
+    const k = (pieceBs[p] as number) + (cx - (pieceAs[p] as number)) * d - (pieceBs[q] as number);
     const a = 1 + d * d;
-    const b = 2 * (d * k - cx);
-    const c = cx * cx + k * k - radius2;
-    const discriminant = b * b - 4 * a * c;
+    const halfB = d * k;
+    const c = k * k - radius2;
+    const quarterDiscriminant = radius2 * a - k * k; // I.e. halfB^2 - a c.
 
-    if (discriminant > 0) {
+    if (quarterDiscriminant > 0) {
       // Compute our roots in a numerically stable way.
 
-      const sqrtDiscriminant = Math.sqrt(discriminant);
-      const q2 = -0.5 * (b + (b >= 0 ? sqrtDiscriminant : -sqrtDiscriminant));
-      const root1 = Math.min(q2 / a, c / q2);
-      const root2 = Math.max(q2 / a, c / q2);
+      const sqrtDiscriminant = Math.sqrt(quarterDiscriminant);
+      const q2 = -(halfB + (halfB >= 0 ? sqrtDiscriminant : -sqrtDiscriminant));
+      const root1 = cx + Math.min(q2 / a, c / q2);
+      const root2 = cx + Math.max(q2 / a, c / q2);
 
-      if (root1 > lo && root1 < hi && d * root1 + k <= 0) {
+      if (root1 > lo && root1 < hi && d * (root1 - cx) + k <= 0) {
         crossings[res++] = root1;
       }
 
-      if (root2 > lo && root2 < hi && d * root2 + k <= 0 && root2 !== root1) {
+      if (root2 > lo && root2 < hi && d * (root2 - cx) + k <= 0 && root2 !== root1) {
         crossings[res++] = root2;
       }
     }
@@ -524,8 +524,10 @@ const insert = (p: number, start: number, end: number): void => {
 
   ensureEntryCapacity(k + nbOfNewEntries);
 
-  entryPieces.set(newPieces.subarray(0, nbOfNewEntries), k);
-  entryStarts.set(newStarts.subarray(0, nbOfNewEntries), k);
+  for (let i = 0; i < nbOfNewEntries; ++i) {
+    entryPieces[k + i] = newPieces[i] as number;
+    entryStarts[k + i] = newStarts[i] as number;
+  }
 
   nbOfEntries = k + nbOfNewEntries;
 };

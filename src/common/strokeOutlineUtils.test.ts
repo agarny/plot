@@ -332,6 +332,17 @@ describe('addStrokeOutline()', () => {
     expect(checkOutline(xs, ys, 4, 3000, 3)).toBeGreaterThan(2000);
   });
 
+  it('covers exactly the stroke of steep segments far from the origin', () => {
+    // A steep segment (e.g., when zoomed in vertically on noisy data) that crosses the disk of a vertex far from the
+    // origin, where computing their crossing in absolute coordinates would lose most of its precision (and miss it,
+    // leaving a hole in our outline).
+
+    const xs = [2000, 2002, 2002.5, 2003, 2012];
+    const ys = [10623, -13097, 14552, 495, 16298];
+
+    expect(checkOutline(xs, ys, 2, 3000, 4, [2002.9, 2003.4, -500, 500])).toBeGreaterThan(2000);
+  });
+
   it('handles U-turns, straight joins, and joins near both ends', () => {
     // Up and down at the same X value (U-turns), collinear points (straight joins), and short segments at both ends.
 
