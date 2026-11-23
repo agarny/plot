@@ -167,6 +167,7 @@ import {
 } from '../common/gpuPlotRenderer';
 import * as levelOfDetailUtils from '../common/levelOfDetailUtils';
 import * as pathLevelOfDetailUtils from '../common/pathLevelOfDetailUtils';
+import { strokeOutlinePolylines } from '../common/strokeOutlineUtils';
 import {
   type LogValues,
   type ValuesStatistics,
@@ -452,7 +453,8 @@ const memoryUsage = (): PlotMemoryUsage => {
   // Note #1: like pointCounts(), this is not reactive, i.e. it is meant to be polled.
   // Note #2: our statistics (see plotValues()) only use a few bytes per trace, so we don't count them. Neither do we
   //          count the buffers that our GPU plot renderer shares between all of our instances (e.g., to convert our
-  //          data before uploading it).
+  //          data before uploading it), nor those that we use to outline our traces in Firefox, which are also shared
+  //          between all of our instances (see linearPaths() and strokeOutlineUtils.ts).
 
   const res: PlotMemoryUsage = {
     levelOfDetail: canvasSelectionXValues.byteLength + canvasSelectionYValues.byteLength,
@@ -1848,6 +1850,12 @@ const seriesData = (u: uPlot, seriesIndex: number): [Float64Array, Float64Array]
   // Return the X and Y values of the given series.
 
   return (u.data as unknown as [null, ...[Float64Array, Float64Array][]])[seriesIndex] ?? undefined;
+};
+
+const seriesColor = (seriesIndex: number): string => {
+  // Return the colour of the given series, i.e. that of its trace.
+
+  return props.data.traces[seriesIndex - 1]?.color ?? 'transparent';
 };
 
 const hasMarkers = (xValues?: Float64Array, yValues?: Float64Array): boolean => {
@@ -4295,7 +4303,7 @@ const drawZeroLines = (u: uPlot): void => {
 // Traces and markers.
 
 const linearPath = (
-  path: Path,
+  path: Pick<Path, 'moveTo' | 'lineTo'>,
   xValues: Float64Array,
   yValues: Float64Array,
   index0: number,
@@ -4698,28 +4706,69 @@ const linearPathPoints = (
 
 let canvasDrawnPoints: number[] = [];
 
+// In Firefox, we fill the outline of the stroke of a trace rather than stroke it (see strokeOutlineUtils.ts) if its
+// path has more than OUTLINE_MIN_POINTS points, is dense (i.e. goes up and down by at least OUTLINE_MIN_TRAVEL line
+// widths per pixel of width, e.g. noisy data), and can be outlined (i.e. if its X values are sorted).
+// Note #1: Firefox strokes such a path very slowly, but it fills its outline quickly. However, outlining a trace takes
+//          a few milliseconds, so it is only worth it for a path that has many points. Indeed, Firefox strokes a dense
+//          path quickly up to about 3,000 points, but much more slowly from about 4,500 points (e.g., 102 FPS rather
+//          than 519 FPS when panning a plot with three noisy traces), while outlining three full-width noisy traces
+//          costs about 8 to 10 ms per frame, whatever their number of points. For example, when panning a plot with
+//          three noisy traces of 1,000,000 points, we get 86 to 107 FPS rather than 5 to 10 FPS.
+// Note #2: we decide whether to outline a trace every time that we build its path, since its number of points depends
+//          on our ranges (e.g., a trace that we zoom in on has fewer visible points, so it may get stroked again).
+// Note #3: other browsers stroke dense paths quickly, so we only outline traces in Firefox.
+
+const OUTLINE_MIN_POINTS = 4000; // Number of points that a path must have more than for it to be outlined.
+const OUTLINE_MIN_TRAVEL = 4; // Vertical travel (in line widths) per pixel of width that a dense path has at least.
+
 const linearPaths: uPlot.Series.PathBuilder = (u: uPlot, seriesIndex: number, index0: number, index1: number) => {
   // Use our linear path builder for our trace (see linearPath()), and our level of detail (see linearPathPoints()),
   // unless our traces are not drawn using Canvas 2D (see prepareFrame()), keeping track of the number of points that we
-  // go through.
+  // go through. In Firefox, fill the outline of our trace rather than stroke it, if needed (see above).
 
   const [xValues, yValues] = seriesData(u, seriesIndex) ?? [];
   const area = pathArea(u);
   const stroke = new Path2D();
+  let outline: Path2D | null = null;
   let nbOfDrawnPoints = 0;
 
   if (xValues && yValues && area && frameRenderer === 'canvas') {
     const points = linearPathPoints(seriesIndex, xValues, yValues, index0, index1, area);
     const lastIndex = Math.min(points.index1, points.xValues.length - 1, points.yValues.length - 1);
 
-    linearPath(stroke, points.xValues, points.yValues, points.index0, points.index1, area);
+    if (isFirefox) {
+      const lineWidth = LINE_WIDTH * area.pxRatio;
+
+      strokeOutlinePolylines.clear();
+
+      linearPath(strokeOutlinePolylines, points.xValues, points.yValues, points.index0, points.index1, area);
+
+      if (
+        strokeOutlinePolylines.nbOfPoints() > OUTLINE_MIN_POINTS &&
+        strokeOutlinePolylines.isDense(lineWidth, OUTLINE_MIN_TRAVEL)
+      ) {
+        outline = new Path2D();
+
+        strokeOutlinePolylines.addOutline(outline, lineWidth);
+      } else {
+        strokeOutlinePolylines.addPolylines(stroke);
+      }
+    } else {
+      linearPath(stroke, points.xValues, points.yValues, points.index0, points.index1, area);
+    }
 
     nbOfDrawnPoints = Math.max(0, lastIndex - points.index0 + 1);
   }
 
   canvasDrawnPoints[seriesIndex - 1] = nbOfDrawnPoints;
 
-  return { stroke, fill: null, clip: null, flags: 0 };
+  // Fill our outline, if we have one, using the colour of our trace, which uPlot uses rather than the fill style of our
+  // series (see drawPath() in uPlot). Otherwise, stroke our path.
+
+  return outline
+    ? { stroke: null, fill: outline, _fill: seriesColor(seriesIndex), clip: null, flags: 0 }
+    : { stroke, fill: null, clip: null, flags: 0 };
 };
 
 const markerPath = (path: Path, xValues: Float64Array, yValues: Float64Array, area: PathArea): void => {
@@ -4842,13 +4891,14 @@ const gpuFrameItemsOf = (u: uPlot): GpuPlotItem[] => {
 //    100,000 points between our traces (e.g., 1.3 to 3.8 times faster for 100 traces of 1,000 points, and 3.5 to 24
 //    times faster for 100 traces of 10,000 points). For 30 traces of 1,000,000 points, Canvas 2D is up to 1.3 times
 //    faster when they are all visible, but WebGL is up to 5.7 times faster when zoomed in; and
-//  - Firefox: Canvas 2D takes a very long time to stroke a dense trace that goes up and down (e.g., noisy data), which
-//    nothing on our side can avoid (we tried using different line joins, stroking a trace in chunks, and drawing it
-//    as rectangles), so WebGL is much faster for such traces (e.g., 130 to 700 FPS against 5 to 10 FPS when panning
-//    three noisy traces of 1,000,000 points). Canvas 2D is faster for smooth traces (1.5 to 4 times faster), but
-//    WebGL is never too slow (e.g., at least 78 FPS in our benchmark, except for 30 noisy traces of 1,000,000 points,
-//    which are slow either way), while Canvas 2D can be extremely slow, and telling smooth traces from noisy ones
-//    beforehand would only be a heuristic.
+//  - Firefox: Canvas 2D takes a very long time to stroke a dense trace that goes up and down (e.g., noisy data), so we
+//    fill the outline of such a trace instead (see linearPaths()), which is much faster (e.g., 86 to 107 FPS against 5
+//    to 10 FPS when panning three noisy traces of 1,000,000 points), but WebGL is faster still (e.g., 130 to 700 FPS).
+//    Canvas 2D is faster for smooth traces (1.5 to 4 times faster), but WebGL is never too slow (e.g., at least 78
+//    FPS in our benchmark, except for 30 noisy traces of 1,000,000 points, which are slow either way), while Canvas 2D
+//    can still be very slow (e.g., 3 to 85 FPS against 162 to 344 FPS using WebGL for 100 noisy traces of 1,000
+//    points, which are too short to be worth outlining, or for a dense trace whose X values are not sorted, i.e. which
+//    cannot be outlined), and telling smooth traces from noisy ones beforehand would only be a heuristic.
 // So, we use Canvas 2D in browsers other than Firefox, unless it would need to stroke at least
 // AUTO_WEBGL_MIN_CANVAS_POINTS points (AUTO_SAFARI_WEBGL_MIN_CANVAS_POINTS in Safari, as well as in any other browser
 // on iOS and iPadOS, since they all use WebKit) for our visible traces, i.e. all the points of a trace, unless our
@@ -5597,7 +5647,7 @@ const createPlot = (width: number, height: number): void => {
     series.push({
       show: traceVisibilities.value[i] ?? true,
       alpha: seriesAlpha(i),
-      stroke: (_plot: uPlot, seriesIndex: number) => props.data.traces[seriesIndex - 1]?.color ?? 'transparent',
+      stroke: (_plot: uPlot, seriesIndex: number) => seriesColor(seriesIndex),
       width: LINE_WIDTH,
       paths: linearPaths,
       points: {
