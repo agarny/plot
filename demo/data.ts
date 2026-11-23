@@ -10,8 +10,8 @@ import type { PlotData, PlotTrace } from '../index';
 //    the column level of detail can be used, but the path level of detail can);
 //  - unsortedNoisy: Lissajous curves with some noise, i.e. the worst case for drawing many unsorted points (since
 //    the path level of detail can hardly simplify them);
-//  - largeOffsets: sine waves with timestamp-like X values and large Y values, i.e. values that WebGL (and its 32-bit
-//    floats) cannot draw precisely once zoomed in a lot, in which case Canvas 2D gets used instead.
+//  - largeOffsets: sine waves with timestamp-like X values and large Y values, i.e. values that must still be drawn
+//    precisely once zoomed in a lot (which they wouldn't be using 32-bit floats).
 
 export type DataKind = 'smooth' | 'noisy' | 'steps' | 'gaps' | 'unsorted' | 'unsortedNoisy' | 'largeOffsets';
 

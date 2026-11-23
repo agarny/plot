@@ -1,4 +1,3 @@
-import type { PlotRenderer } from '../index';
 import type { DataKind } from './data';
 
 // What our benchmark script (see scripts/benchmark.ts) needs to know about our demo's benchmark (see App.vue), i.e. its
@@ -18,7 +17,6 @@ export interface BenchmarkScenario {
   traces: number; // Number of traces per instance.
   points: number; // Number of points per trace.
   instances: number; // Number of instances of our plot.
-  renderer: PlotRenderer; // Renderer to use (e.g., "canvas" or "webgl").
 }
 
 export interface BenchmarkResult {
@@ -29,7 +27,6 @@ export interface BenchmarkResult {
 
 export interface BenchmarkReport {
   results: Record<string, BenchmarkResult>; // Results of our interactions, by name (see BENCHMARK_INTERACTIONS).
-  drawnUsing: string; // What our traces got drawn using (e.g., "Canvas 2D" or "WebGL").
   firstDraw: number; // Time to first draw of our data (in milliseconds).
 }
 

@@ -4,12 +4,12 @@
 
 Key characteristics:
 - Built as a [Vue 3](https://vuejs.org/) component using the [Composition API](https://vuejs.org/guide/extras/composition-api-faq).
-- Uses [uPlot](https://github.com/leeoniya/uPlot) under the hood, and draws traces using Canvas 2D or [WebGL](https://developer.mozilla.org/en-US/docs/Web/API/WebGL_API), whichever is faster for the browser and the data.
+- Uses [uPlot](https://github.com/leeoniya/uPlot) under the hood, and draws traces using Canvas 2D.
 - It does not rely on any UI framework (e.g., [PrimeVue](https://primevue.org/)) or CSS framework (e.g., [Tailwind CSS](https://tailwindcss.com/)).
 
 Contents:
 - [Installation](#installation)
-- [Usage](#usage): [Types](#types), [Data](#data), [Large and live data](#large-and-live-data), [Props](#props), [Events](#events), [Properties](#properties), [Methods](#methods), [Interaction](#interaction), and [Theming](#theming)
+- [Usage](#usage): [Types](#types), [Data](#data), [Large and live data](#large-and-live-data), [Props](#props), [Events](#events), [Methods](#methods), [Interaction](#interaction), and [Theming](#theming)
 - [Development](#development): [Benchmarking](#benchmarking) and [Releasing](#releasing)
 - [License](#license)
 
@@ -65,8 +65,6 @@ The component is the default export of `@opencor/plot`, and is also exported as 
 | `PlotTrace` | `{ name, x, y, xValue, yValue, color, traceId?, legendRank?, runLabel? }` | A trace to plot (see [Data](#data)). |
 | `PlotMargins` | `{ left: number; right: number }` | The left and right margins (in pixels) of a plot, i.e. the space taken by its Y axis and legend (see the [`margins`](#props) prop and the [`marginsUpdated`](#events) event). |
 | `PlotTheme` | `'system' \| 'light' \| 'dark'` | The value of the [`theme`](#props) prop. |
-| `PlotRenderer` | `'auto' \| 'canvas' \| 'webgl'` | The value of the [`renderer`](#props) prop. |
-| `PlotActiveRenderer` | `'canvas' \| 'webgl' \| 'none'` | The value of the [`activeRenderer`](#properties) property (`'none'` if traces couldn't be drawn). |
 | `PlotCsvExportEvent` | `PlotCsvExportStartedEvent \| PlotCsvExportProgressEvent \| PlotCsvExportFinishedEvent` | The payload of the [`csvExport`](#events) event. Use its `type` to tell which one it is. |
 | `PlotCsvExportStartedEvent` | `{ type: 'started' }` | An export to CSV has started. |
 | `PlotCsvExportProgressEvent` | `{ type: 'progress'; percent: number }` | An export to CSV has made some progress: `percent` goes from 0 to 100 (an integer). |
@@ -77,7 +75,7 @@ The component is the default export of `@opencor/plot`, and is also exported as 
 | `ContextMenuSeparator` | `{ separator: true }` | A separator. |
 | `IconName` | `'angle-right' \| 'arrows-h' \| 'arrows-v' \| 'chart-line' \| 'check' \| 'copy' \| 'download' \| 'image' \| 'refresh' \| 'search-minus' \| 'search-plus'` | The name of an icon (from [PrimeIcons](https://primevue.org/icons/)). |
 | `PlotPointCounts` | `{ nbOfPoints: number; nbOfDrawnPoints: number }` | The value returned by the [`pointCounts()`](#methods) method. |
-| `PlotMemoryUsage` | `{ levelOfDetail: number; logValues: number; gpu: number }` | The value returned by the [`memoryUsage()`](#methods) method. |
+| `PlotMemoryUsage` | `{ levelOfDetail: number; logValues: number }` | The value returned by the [`memoryUsage()`](#methods) method. |
 
 ### Data
 
@@ -138,11 +136,10 @@ Also set the [`live`](#props) prop while the data is live, so that the last poin
 | `margins` | [`PlotMargins`](#types) | | Margins shared with other plots, so that their plotting areas line up (see [`marginsUpdated`](#events)). |
 | `appendTo` | `HTMLElement \| string` | `body` | Where to append our overlays (context menu, hover tooltip, etc.). |
 | `customContextMenu` | `boolean` | `false` | Whether to emit a [`contextMenu`](#events) event rather than show our own context menu. To have no context menu at all, set it and don't handle the `contextMenu` event. |
-| `renderer` | [`PlotRenderer`](#types) | `'auto'` | What to draw traces with. `'auto'` uses whichever is faster for the browser and the data: WebGL in Firefox, and in other browsers only when Canvas 2D would need to stroke at least 300,000 points for the visible traces (e.g., noisy traces whose X values are not sorted, or traces that are too short for our level of detail to be used, like 100 traces of 10,000 points, but not smooth phase plots, which only need a few thousand points); Canvas 2D otherwise. With `'webgl'`, traces are not drawn if WebGL is not available. Whenever WebGL is used, Canvas 2D takes over if WebGL is not available (with `'auto'`) or not precise enough for the current ranges (e.g., when zoomed in a lot). |
 | `levelOfDetail` | `boolean` | `true` | Whether to only go through the points that are needed for a trace to look the same when drawing it (see [Large and live data](#large-and-live-data)). Hovering a trace whose X values are sorted always does. Only meant to be disabled to see how much it helps. |
 | `live` | `boolean` | `false` | Whether the data is live (e.g., while a simulation is running), in which case the last point of each visible trace is marked. |
 
-To draw traces like a plain uPlot plot would, i.e. without our WebGL renderer and our level of detail, use `renderer="canvas"` and `:levelOfDetail="false"`. uPlot then draws every point of every trace on its canvas, using our path builder. Unlike uPlot's own, our path builder handles gaps (`NaN` values) and traces whose X values are not sorted (e.g., phase plots) at any number of points. This is also the reference that our optimisations can be benchmarked against.
+To draw traces like a plain uPlot plot would, i.e. without our level of detail, use `:levelOfDetail="false"`. uPlot then draws every point of every trace on its canvas, using our path builder. Unlike uPlot's own, our path builder handles gaps (`NaN` values) and traces whose X values are not sorted (e.g., phase plots) at any number of points, and in Firefox, it fills the outline of a dense trace (e.g., noisy data) with many points rather than stroke it, since Firefox strokes such a trace very slowly. This is also the reference that our optimisations can be benchmarked against.
 
 ### Events
 
@@ -151,14 +148,6 @@ To draw traces like a plain uPlot plot would, i.e. without our WebGL renderer an
 | `marginsUpdated` | [`PlotMargins`](#types) | The margins that the plot needs have changed. To line up several plots, pass the largest left and right margins of all of them to each plot's [`margins`](#props) prop. |
 | `csvExport` | [`PlotCsvExportEvent`](#types) | An export to CSV has `'started'`, made `'progress'` (with a `percent`), or `'finished'` (with whether it was a `success`), so that its progress can be shown. |
 | `contextMenu` | [`PlotContextMenuEvent`](#types) | Only with [`customContextMenu`](#props): the context menu was requested at `clientX`/`clientY`, with the `items` that our context menu would have shown. If `usingKeyboard` is true, the custom menu should take the keyboard focus. |
-
-### Properties
-
-Available through a template ref:
-
-| Property | Type | Description |
-|---|---|---|
-| `activeRenderer` | [`PlotActiveRenderer`](#types) | The renderer that was last used to draw traces: `'canvas'`, `'webgl'`, or `'none'` (if they couldn't be drawn). Read-only. |
 
 ### Methods
 
@@ -169,7 +158,7 @@ Available through a template ref:
 | `resetMargins()` | Emit [`marginsUpdated`](#events) again, e.g. after the shared margins have been reset. |
 | `contextMenuHidden()` | Tell the plot that a custom context menu (see [`contextMenu`](#events)) has been hidden, so that it can get the keyboard focus back. |
 | `pointCounts()` | The number of points of the visible traces (`nbOfPoints`), and how many of them were last drawn (`nbOfDrawnPoints`), as an [`PlotPointCounts`](#types). Meant for testing and benchmarking. |
-| `memoryUsage()` | The memory (in bytes) used by the component itself, not counting the data, as an [`PlotMemoryUsage`](#types): by its levels of detail (`levelOfDetail`), by the logarithm of its values along logarithmic axes (`logValues`), and on the GPU (`gpu`). Meant for testing and benchmarking. |
+| `memoryUsage()` | The memory (in bytes) used by the component itself, not counting the data, as an [`PlotMemoryUsage`](#types): by its levels of detail (`levelOfDetail`) and by the logarithm of its values along logarithmic axes (`logValues`). Meant for testing and benchmarking. |
 
 ### Interaction
 
@@ -236,13 +225,12 @@ bun version:new          # Bump the version number.
 
 ### Benchmarking
 
-`bun benchmark` builds the demo app, serves it, and runs its benchmark (i.e. what its **Benchmark** button does) in one or more browsers, for a set of scenarios and renderers. Its results get saved as a report in `benchmark-results/`, named after when the benchmark was run, as HTML (to be opened in a browser), Markdown (e.g., to be pasted in an issue), and JSON (e.g., to be compared with other results). The report is updated as results come in, so it is there even if the benchmark gets interrupted.
+`bun benchmark` builds the demo app, serves it, and runs its benchmark (i.e. what its **Benchmark** button does) in one or more browsers, for a set of scenarios. Its results get saved as a report in `benchmark-results/`, named after when the benchmark was run, as HTML (to be opened in a browser), Markdown (e.g., to be pasted in an issue), and JSON (e.g., to be compared with other results). The report is updated as results come in, so it is there even if the benchmark gets interrupted.
 
 ```bash
-bun benchmark                                       # All the browsers and scenarios, Canvas 2D and WebGL.
+bun benchmark                                       # All the browsers and scenarios.
 bun benchmark --browsers chrome                     # Only Chrome.
 bun benchmark --scenarios noisy-3x1m,unsorted-3x1m  # Only some scenarios (see bun benchmark --list).
-bun benchmark --renderers auto                      # Only what 'auto' uses.
 bun benchmark --output ~/results                    # Save the report somewhere else.
 bun benchmark --help                                # All the options.
 ```
@@ -251,16 +239,15 @@ Requirements:
 - **Chrome and Firefox:** they must be installed, and are driven using [Puppeteer](https://pptr.dev/). Chrome runs headless (unless `--headed` is given), but a Firefox window opens, since headless Firefox doesn't draw using the GPU and caps its frame rate.
 - **Safari** (macOS only): it is driven using `safaridriver`, which must be enabled once, using `safaridriver --enable` and Safari's **Develop › Allow Remote Automation** menu item (the **Develop** menu can be shown in Safari's **Advanced** settings). A Safari window opens.
 - **Browsers:** by default, Chrome, Firefox, and (on macOS) Safari are used, skipping those that cannot be launched (e.g., if they are not installed).
-- **Time:** each scenario takes about 40 seconds per renderer, so all of them take about 20 minutes per browser with two renderers (i.e. about an hour for all three browsers). Don't use the computer in the meantime, since it would affect the results. On macOS, the benchmark keeps the display on while it runs (browsers stop drawing when the display is off), and refuses to start if the screen is locked.
+- **Time:** each scenario takes about 40 seconds, so all of them take about 10 minutes per browser (i.e. about half an hour for all three browsers). Don't use the computer in the meantime, since it would affect the results. On macOS, the benchmark keeps the display on while it runs (browsers stop drawing when the display is off), and refuses to start if the screen is locked.
 
-A scenario is a kind of data (e.g., `noisy` sine waves or `unsorted` Lissajous curves, like in the demo app) with a number of plots, traces, and points (e.g., `noisy-16-plots-3x100k` is 16 plots of 3 noisy traces of 100,000 points). For each scenario and renderer, the benchmark zooms the plots in and out, pans them at a zoom of 1×, 10×, and 100× (the more zoomed in, the fewer the visible points), plots their data live (as if it was being generated), and resizes them, each for 5 seconds.
+A scenario is a kind of data (e.g., `noisy` sine waves or `unsorted` Lissajous curves, like in the demo app) with a number of plots, traces, and points (e.g., `noisy-16-plots-3x100k` is 16 plots of 3 noisy traces of 100,000 points). For each scenario, the benchmark zooms the plots in and out, pans them at a zoom of 1×, 10×, and 100× (the more zoomed in, the fewer the visible points), plots their data live (as if it was being generated), and resizes them, each for 5 seconds.
 
 Reading the results:
 - **Header:** each table is preceded by the browser's version, the GPU, and the device pixel ratio.
-- **Cells:** the frame rate, and the average and 95th percentile of the redraw time (e.g., `800 FPS, 1.2/2.0 ms`). For each scenario and interaction, the renderer that did best is highlighted: the one with the highest frame rate if it is not capped, or the one with the lowest redraw time otherwise. The redraw time is the time it takes to redraw all the plots in a frame, including the browser rendering the frame. The lower, the better, and a 95th percentile much higher than the average means occasional stutters. At 60 Hz, a frame lasts 16.7 ms.
-- **Frame rate:** in Chrome and Firefox, it is not capped by the refresh rate of the display (unless `--capped` is given), so it tells how fast the plots can be redrawn, including WebGL's GPU time, which the redraw time doesn't fully include (since WebGL draws asynchronously). In Safari (or with `--capped`), it is capped by the refresh rate of the display, so compare redraw times instead.
-- **Drawn using:** what the traces were actually drawn using (e.g., WebGL hands over to Canvas 2D when it is not precise enough, which may be the case for `large-offsets-3x1m` when zoomed in a lot).
-- **First draw:** the time from giving the data to the plots to them having drawn it, which includes creating the plots, processing the data, and building the levels of detail (and uploading the data to the GPU, for WebGL).
+- **Cells:** the frame rate, and the average and 95th percentile of the redraw time (e.g., `800 FPS, 1.2/2.0 ms`). The redraw time is the time it takes to redraw all the plots in a frame, including the browser rendering the frame. The lower, the better, and a 95th percentile much higher than the average means occasional stutters. At 60 Hz, a frame lasts 16.7 ms.
+- **Frame rate:** in Chrome and Firefox, it is not capped by the refresh rate of the display (unless `--capped` is given), so it tells how fast the plots can be redrawn. In Safari (or with `--capped`), it is capped by the refresh rate of the display, so compare redraw times instead.
+- **First draw:** the time from giving the data to the plots to them having drawn it, which includes creating the plots, processing the data, and building the levels of detail.
 
 The results depend on the computer, the browser (and its version), and the display, so only compare results from the same computer. To measure the effect of a change, run the same scenarios before and after it.
 

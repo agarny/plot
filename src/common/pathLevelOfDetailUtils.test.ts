@@ -379,10 +379,9 @@ describe('update()', () => {
   });
 
   it('starts again from scratch if its points are not a continuation of the ones it was last updated with', () => {
-    // A path level of detail may be shared, so it may get updated with some values (e.g., by one of its users), then
-    // with other values (e.g., by another of its users), and then with a continuation of the first values (e.g., by the
-    // first user again), in which case it must not keep what it did for the other values (see Note #8 of
-    // pathLevelOfDetailUtils.ts).
+    // A path level of detail may get updated with some values, then with other values (e.g., if the traces of a plot
+    // have changed in the meantime), and then with a continuation of the first values, in which case it must not keep
+    // what it did for the other values (see Note #8 of pathLevelOfDetailUtils.ts).
 
     const random = randomGenerator(852);
     const [xBuffer, yBuffer] = randomWalk(random, 3000, true);
@@ -409,13 +408,17 @@ describe('update()', () => {
       );
     }
 
-    // The very same values are assumed not to have changed, so nothing gets taken into account again.
+    // The very same values are assumed not to have changed, so nothing gets taken into account again, i.e. not even a
+    // change to them.
 
-    const version = lod.version;
+    const finestLevel = NB_OF_LEVELS - 1;
+    const indices = levelIndices(lod, xValues, yValues, finestLevel);
+
+    yValues[1500] = (yValues[1500] as number) + 1000;
 
     update(lod, xValues, yValues, 3000);
 
-    expect(lod.version).toBe(version);
+    expect(levelIndices(lod, xValues, yValues, finestLevel)).toEqual(indices);
   });
 
   it('gets the same levels whether it processes its points incrementally or in one go', () => {
@@ -582,72 +585,16 @@ describe('invalidate()', () => {
   it('resets itself if all of its points may have changed', () => {
     const [xValues, yValues] = curve(100);
     const lod = levelOfDetail(xValues, yValues);
-    const version = lod.version;
 
     invalidate(lod, 0);
 
-    expect({ ...lod, version: 0, xValues: undefined, yValues: undefined } as PathLevelOfDetail).toEqual(create());
-    expect(lod.version).toBeGreaterThan(version);
+    expect({ ...lod, xValues: undefined, yValues: undefined } as PathLevelOfDetail).toEqual(create());
 
     // So, it doesn't keep any of its previous points if it now has no points.
 
     update(lod, xValues, yValues, 0);
 
     expect(lod.levels).toEqual([]);
-  });
-});
-
-// version.
-
-describe('version', () => {
-  it('changes whenever its levels may have changed, and only then', () => {
-    const [xValues, yValues] = curve(100);
-    const lod = create();
-    let version = lod.version;
-
-    const versionChanged = (): boolean => {
-      const res = lod.version !== version;
-
-      version = lod.version;
-
-      return res;
-    };
-
-    // When we process new points, but not if we have already processed them.
-
-    update(lod, xValues, yValues, 50);
-
-    expect(versionChanged()).toBe(true);
-
-    update(lod, xValues, yValues, 50);
-
-    expect(versionChanged()).toBe(false);
-
-    // When we process points again, even the same ones.
-
-    invalidate(lod, 49);
-    update(lod, xValues, yValues, 50);
-
-    expect(versionChanged()).toBe(true);
-
-    // When we get reset, even if we then process the same points (since our levels may be different, e.g. if our sizes
-    // end up being different).
-
-    invalidate(lod, 0);
-
-    expect(versionChanged()).toBe(true);
-
-    update(lod, xValues, yValues, 50);
-
-    expect(versionChanged()).toBe(true);
-
-    // When our levels get rebuilt.
-
-    xValues[60] = 100;
-
-    update(lod, xValues, yValues, 100);
-
-    expect(versionChanged()).toBe(true);
   });
 });
 

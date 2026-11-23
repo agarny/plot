@@ -1,4 +1,4 @@
-// Incremental processing of the values of our traces (see PlotWidget.vue and gpuPlotRenderer.ts).
+// Incremental processing of the values of our traces (see PlotWidget.vue).
 // Note: our data gets may get updated often (e.g., many times a second while a simulation is running), and typically
 //       with a few more values each time. So, rather than process all of our values every time, we check whether they
 //       are a continuation of the values we processed before (i.e. a view of the same buffer, from the same offset, and
@@ -112,7 +112,7 @@ export const valuesStatistics = (values: Float64Array, previous?: ValuesStatisti
 // Note #1: we keep the logarithm of some values in a buffer. If some values are a continuation of the previous ones,
 //          then we only convert their last value onwards, in the same buffer, and we return a view of that buffer.
 //          This means that the logarithm of some values is itself a continuation of the logarithm of their previous
-//          values, so that their statistics (see valuesStatistics()) and our GPU plot renderer only need to process
+//          values, so that their statistics (see valuesStatistics()) and our levels of detail only need to process
 //          their new values too.
 // Note #2: we create a new buffer whenever some values are not a continuation of the previous ones, so that we never
 //          present new values as a continuation of old ones. Also, a new buffer has room for twice as many values as we

@@ -158,13 +158,6 @@ import * as vue from 'vue';
 import 'uplot/dist/uPlot.min.css';
 
 import * as common from '../common/common';
-import {
-  gpuPlotRenderer,
-  type GpuPlotItem,
-  type GpuPlotPointCounts,
-  type GpuPlotTrace,
-  isPrecise as isGpuPlotPrecise
-} from '../common/gpuPlotRenderer';
 import * as levelOfDetailUtils from '../common/levelOfDetailUtils';
 import * as pathLevelOfDetailUtils from '../common/pathLevelOfDetailUtils';
 import { strokeOutlinePolylines } from '../common/strokeOutlineUtils';
@@ -228,13 +221,6 @@ export type PlotCsvExportEvent = PlotCsvExportStartedEvent | PlotCsvExportProgre
 
 export type PlotTheme = 'system' | 'light' | 'dark';
 
-// Our renderer, i.e. what we should use to draw our traces: whatever is best for the browser and our traces ('auto',
-// see useCanvas2D()), Canvas 2D ('canvas'), or WebGL ('webgl'). Also, the renderer that we actually used to draw our
-// traces the last time our plot got drawn ('none' meaning that they couldn't be drawn, see Note #3 below).
-
-export type PlotRenderer = 'auto' | 'canvas' | 'webgl';
-export type PlotActiveRenderer = 'canvas' | 'webgl' | 'none';
-
 // The number of points of our visible traces and the number of them that actually got drawn the last time our plot got
 // drawn, i.e. how much drawing only the points that are needed for our traces to look the same helps (see
 // pointCounts()). This is mainly meant for testing and benchmarking.
@@ -248,9 +234,8 @@ export interface PlotPointCounts {
 // memoryUsage(). This is mainly meant for testing and benchmarking.
 
 export interface PlotMemoryUsage {
-  levelOfDetail: number; // Our levels of detail (shared by both of our renderers) and our Canvas 2D selection.
+  levelOfDetail: number; // Our levels of detail and our Canvas 2D selection.
   logValues: number; // The decimal logarithm of our values along our logarithmic axes (see plotValues()).
-  gpu: number; // The buffers of our traces on the GPU (see gpuPlotRenderer.ts).
 }
 
 // Context menu event, which is emitted rather than showing our context menu if we are to use a custom context menu (see
@@ -272,13 +257,9 @@ export interface PlotContextMenuEvent {
 //          is our document's body by default.
 // Note #2: customContextMenu is whether we should emit a contextMenu event rather than show our own context menu (see
 //          PlotContextMenuEvent).
-// Note #3: renderer is what we should use to draw our traces (see PlotRenderer). With 'webgl', our traces don't
-//          get drawn if WebGL is not available (e.g., if it is disabled or if our WebGL context is lost), but they get
-//          drawn using Canvas 2D if WebGL is not precise enough for our current ranges (e.g., if we are zoomed in a
-//          lot), since they would otherwise visibly be in the wrong place (see isPrecise() in gpuPlotRenderer.ts).
-// Note #4: levelOfDetail is whether we should only go through the points that are needed for our traces to look the
-//          same (see linearPathPoints() and Note #7 of gpuPlotRenderer.ts), which is what we should normally do. It
-//          can, however, be disabled to see (e.g., in our demo) how much it helps.
+// Note #3: levelOfDetail is whether we should only go through the points that are needed for our traces to look the
+//          same (see linearPathPoints()), which is what we should normally do. It can, however, be disabled to see
+//          (e.g., in our demo) how much it helps.
 
 const props = withDefaults(
   defineProps<{
@@ -288,7 +269,6 @@ const props = withDefaults(
     theme?: PlotTheme;
     appendTo?: HTMLElement | string;
     customContextMenu?: boolean;
-    renderer?: PlotRenderer;
     levelOfDetail?: boolean;
     live?: boolean;
   }>(),
@@ -296,7 +276,6 @@ const props = withDefaults(
     showLegend: true,
     theme: 'system',
     customContextMenu: false,
-    renderer: 'auto',
     levelOfDetail: true,
     live: false
   }
@@ -415,13 +394,9 @@ const pointCounts = (): PlotPointCounts => {
   // plot got drawn (see PlotPointCounts).
   // Note #1: this is not reactive since it would otherwise trigger a Vue update every time our plot gets drawn (e.g.,
   //          while zooming or panning), i.e. it is meant to be polled.
-  // Note #2: with Canvas 2D, the points of a trace that got drawn are those that we went through to build its path,
-  //          even though only some of them may end up in it (see linearPath()), since that is what drawing it costs.
-  //          Also, all the markers of a trace get drawn, if it has some (see markerPath()).
-
-  if (frameRenderer === 'webgl') {
-    return { ...gpuPointCounts };
-  }
+  // Note #2: the points of a trace that got drawn are those that we went through to build its path, even though only
+  //          some of them may end up in it (see linearPath()), since that is what drawing it costs. Also, all the
+  //          markers of a trace get drawn, if it has some (see markerPath()).
 
   const res: PlotPointCounts = { nbOfPoints: 0, nbOfDrawnPoints: 0 };
 
@@ -439,10 +414,7 @@ const pointCounts = (): PlotPointCounts => {
     const nbOfPoints = Math.min(xValues.length, yValues.length);
 
     res.nbOfPoints += nbOfPoints;
-
-    if (frameRenderer === 'canvas') {
-      res.nbOfDrawnPoints += hasMarkers(xValues, yValues) ? nbOfPoints : (canvasDrawnPoints[seriesIndex - 1] ?? 0);
-    }
+    res.nbOfDrawnPoints += hasMarkers(xValues, yValues) ? nbOfPoints : (canvasDrawnPoints[seriesIndex - 1] ?? 0);
   }
 
   return res;
@@ -452,14 +424,12 @@ const memoryUsage = (): PlotMemoryUsage => {
   // Return the number of bytes that we use for our own purposes (see PlotMemoryUsage).
   // Note #1: like pointCounts(), this is not reactive, i.e. it is meant to be polled.
   // Note #2: our statistics (see plotValues()) only use a few bytes per trace, so we don't count them. Neither do we
-  //          count the buffers that our GPU plot renderer shares between all of our instances (e.g., to convert our
-  //          data before uploading it), nor those that we use to outline our traces in Firefox, which are also shared
-  //          between all of our instances (see linearPaths() and strokeOutlineUtils.ts).
+  //          count the buffers that we use to outline our traces in Firefox, since they are shared between all of our
+  //          instances (see linearPaths() and strokeOutlineUtils.ts).
 
   const res: PlotMemoryUsage = {
     levelOfDetail: canvasSelectionXValues.byteLength + canvasSelectionYValues.byteLength,
-    logValues: 0,
-    gpu: 0
+    logValues: 0
   };
 
   for (const lod of traceLods) {
@@ -471,15 +441,6 @@ const memoryUsage = (): PlotMemoryUsage => {
   for (const lod of pathLods) {
     if (lod) {
       res.levelOfDetail += pathLevelOfDetailUtils.memoryUsage(lod);
-    }
-  }
-
-  for (const gpuTrace of gpuTraces) {
-    if (gpuTrace) {
-      const gpuTraceMemoryUsage = gpuTrace.memoryUsage();
-
-      res.levelOfDetail += gpuTraceMemoryUsage.cpu;
-      res.gpu += gpuTraceMemoryUsage.gpu;
     }
   }
 
@@ -496,12 +457,7 @@ const memoryUsage = (): PlotMemoryUsage => {
   return res;
 };
 
-// The renderer that we actually used to draw our traces the last time our plot got drawn (see prepareFrame()).
-
-const activeRenderer = vue.ref<PlotActiveRenderer>('canvas');
-
 defineExpose({
-  activeRenderer: vue.readonly(activeRenderer),
   contextMenuHidden,
   memoryUsage,
   pointCounts,
@@ -517,7 +473,6 @@ const rangeEditorRef = vue.shallowRef<HTMLElement | null>(null);
 const hoverTooltipRef = vue.shallowRef<HTMLElement | null>(null);
 const contextMenuRef = vue.ref<InstanceType<typeof ContextMenuWidget> | null>(null);
 let plot: uPlot | undefined;
-let stopListeningToGpuAvailabilityChanges: (() => void) | undefined;
 let plotSignature: string | undefined;
 let isPlotOutdated = false;
 let isUnmounted = false;
@@ -4524,19 +4479,17 @@ const linearPath = (
 //          pixel columns), and only give them to linearPath().
 // Note #2: our columns are our pixel columns (i.e. those of linearPath()), so our selected points include all the
 //          points that linearPath() would draw, i.e. our trace looks exactly the same.
-// Note #3: like our GPU plot renderer, we keep our level of detail up to date incrementally (see traceValues.ts).
-// Note #4: the level of detail of a trace is shared with our GPU plot renderer (see gpuFrameItemsOf()), our hover (see
-//          hoveredIndex()), and useCanvas2D(), so that they don't need their own (and therefore more memory). It keeps
-//          track of the values that it was last updated with (see Note #9 of levelOfDetailUtils.ts), so each of them
-//          only needs to update it with the values that it uses (see updatedTraceLod()).
+// Note #3: we keep our level of detail up to date incrementally (see traceValues.ts).
+// Note #4: the level of detail of a trace is shared with our hover (see hoveredIndex()), so that it doesn't need its
+//          own (and therefore more memory). It keeps track of the values that it was last updated with (see Note #8 of
+//          levelOfDetailUtils.ts), so each of its users only needs to update it with the values that it uses (see
+//          updatedTraceLod()).
 // Note #5: if the X values of our trace are not sorted (e.g., a phase plot), then linearPath() has to go through all
 //          of its points. So, we first select the points that keep our trace within PATH_LOD_TOLERANCE canvas pixels of
 //          what it would otherwise look like (along each axis) using our path level of detail (see
 //          pathLevelOfDetailUtils.ts), and only give them to linearPath(). For a smooth trace, this means a few
 //          thousand rather than millions of points, but not for a noisy trace (which our path level of detail can't
-//          reduce, in which case we give all of its points to linearPath()). Like our level of detail, our path level
-//          of detail is shared with our GPU plot renderer (see gpuFrameItemsOf()) and with useCanvas2D() (see Note #4
-//          above).
+//          reduce, in which case we give all of its points to linearPath()).
 
 const PATH_LOD_TOLERANCE = 0.25; // In canvas pixels, i.e. our traces are off by at most about 0.35 canvas pixels.
 
@@ -4550,34 +4503,22 @@ interface LinearPathPoints {
 let traceLods: levelOfDetailUtils.LevelOfDetail[] = [];
 let pathLods: pathLevelOfDetailUtils.PathLevelOfDetail[] = [];
 
-const traceLod = (traceIndex: number): levelOfDetailUtils.LevelOfDetail => {
-  // Return the level of detail of the given trace, creating it if needed (see Note #4 above).
-
-  traceLods[traceIndex] ??= levelOfDetailUtils.create();
-
-  return traceLods[traceIndex];
-};
-
 const updatedTraceLod = (
   traceIndex: number,
   xValues: Float64Array,
   yValues: Float64Array,
   count: number
 ): levelOfDetailUtils.LevelOfDetail => {
-  // Return the level of detail of the given trace, once updated for the given points (see Note #4 above).
+  // Return the level of detail of the given trace (creating it if needed), once updated for the given points (see
+  // Note #4 above).
 
-  const lod = traceLod(traceIndex);
+  traceLods[traceIndex] ??= levelOfDetailUtils.create();
+
+  const lod = traceLods[traceIndex];
 
   levelOfDetailUtils.update(lod, xValues, yValues, count);
 
   return lod;
-};
-const pathLod = (traceIndex: number): pathLevelOfDetailUtils.PathLevelOfDetail => {
-  // Return the path level of detail of the given trace, creating it if needed (see Note #5 above).
-
-  pathLods[traceIndex] ??= pathLevelOfDetailUtils.create();
-
-  return pathLods[traceIndex];
 };
 
 const updatedPathLod = (
@@ -4586,9 +4527,12 @@ const updatedPathLod = (
   yValues: Float64Array,
   count: number
 ): pathLevelOfDetailUtils.PathLevelOfDetail => {
-  // Return the path level of detail of the given trace, once updated for the given points (see Note #5 above).
+  // Return the path level of detail of the given trace (creating it if needed), once updated for the given points (see
+  // Note #5 above).
 
-  const lod = pathLod(traceIndex);
+  pathLods[traceIndex] ??= pathLevelOfDetailUtils.create();
+
+  const lod = pathLods[traceIndex];
 
   pathLevelOfDetailUtils.update(lod, xValues, yValues, count);
 
@@ -4722,10 +4666,12 @@ let canvasDrawnPoints: number[] = [];
 const OUTLINE_MIN_POINTS = 4000; // Number of points that a path must have more than for it to be outlined.
 const OUTLINE_MIN_TRAVEL = 4; // Vertical travel (in line widths) per pixel of width that a dense path has at least.
 
+const isFirefox = typeof navigator !== 'undefined' && navigator.userAgent.includes('Firefox/');
+
 const linearPaths: uPlot.Series.PathBuilder = (u: uPlot, seriesIndex: number, index0: number, index1: number) => {
   // Use our linear path builder for our trace (see linearPath()), and our level of detail (see linearPathPoints()),
-  // unless our traces are not drawn using Canvas 2D (see prepareFrame()), keeping track of the number of points that we
-  // go through. In Firefox, fill the outline of our trace rather than stroke it, if needed (see above).
+  // keeping track of the number of points that we go through. In Firefox, fill the outline of our trace rather than
+  // stroke it, if needed (see above).
 
   const [xValues, yValues] = seriesData(u, seriesIndex) ?? [];
   const area = pathArea(u);
@@ -4733,7 +4679,7 @@ const linearPaths: uPlot.Series.PathBuilder = (u: uPlot, seriesIndex: number, in
   let outline: Path2D | null = null;
   let nbOfDrawnPoints = 0;
 
-  if (xValues && yValues && area && frameRenderer === 'canvas') {
+  if (xValues && yValues && area) {
     const points = linearPathPoints(seriesIndex, xValues, yValues, index0, index1, area);
     const lastIndex = Math.min(points.index1, points.xValues.length - 1, points.yValues.length - 1);
 
@@ -4815,258 +4761,14 @@ const markerPaths: uPlot.Series.Points.PathBuilder = (u: uPlot, seriesIndex: num
   return { stroke: null, fill, clip, flags: 0 };
 };
 
-// GPU rendering of our traces and markers (see gpuPlotRenderer.ts).
-// Note #1: when a frame gets drawn, we first determine how our traces are to be drawn (see prepareFrame()), i.e. using
-//          WebGL (if it is to be used, see useCanvas2D(), is available, and is precise enough for our current ranges,
-//          which it may not be if we are zoomed in a lot), using Canvas 2D, or not at all (if only WebGL is to be used,
-//          but it is not available). Unless Canvas 2D is to be used, our path builders don't build any path for uPlot
-//          to draw (see linearPaths() and our markers' show function). If WebGL is to be used, then we draw our traces
-//          ourselves, once uPlot has drawn everything else (see drawGpuTraces()), which is when uPlot would have drawn
-//          them.
-// Note #2: uPlot caches the paths of our traces, so we invalidate them whenever we switch between drawing our traces
-//          using Canvas 2D and not.
-// Note #3: our exports don't rely on what gets drawn (see svgDocument()), so they are not affected.
-
-let frameRenderer: PlotActiveRenderer = 'canvas';
-let gpuFrameItems: GpuPlotItem[] = [];
-const gpuPointCounts: GpuPlotPointCounts = { nbOfPoints: 0, nbOfDrawnPoints: 0 };
-let gpuTraces: (GpuPlotTrace | undefined)[] = [];
-let warnedAboutWebGlNotBeingAvailable = false;
-
-const disposeGpuTraces = (fromIndex: number = 0): void => {
-  for (const gpuTrace of gpuTraces.slice(fromIndex)) {
-    gpuTrace?.dispose();
-  }
-
-  gpuTraces = gpuTraces.slice(0, fromIndex);
-};
-
-const gpuFrameItemsOf = (u: uPlot): GpuPlotItem[] => {
-  // Make sure that the data of our visible traces is on the GPU, and that the data of our other traces is not (so that
-  // a hidden trace doesn't keep using GPU memory), and return what we need to draw for our visible traces.
-
-  const res: GpuPlotItem[] = [];
-  const pxRatio = uPlot.pxRatio;
-
-  for (let seriesIndex = 1; seriesIndex < u.series.length; ++seriesIndex) {
-    const [xValues, yValues] = seriesData(u, seriesIndex) ?? [];
-    const color = props.data.traces[seriesIndex - 1]?.color;
-
-    if (!u.series[seriesIndex]?.show || !xValues || !yValues || !color) {
-      gpuTraces[seriesIndex - 1]?.dispose();
-      gpuTraces[seriesIndex - 1] = undefined;
-
-      continue;
-    }
-
-    gpuTraces[seriesIndex - 1] ??= gpuPlotRenderer.createTrace(traceLod(seriesIndex - 1), pathLod(seriesIndex - 1));
-
-    const gpuTrace = gpuTraces[seriesIndex - 1] as GpuPlotTrace;
-
-    gpuTrace.update(xValues, yValues);
-
-    res.push({
-      trace: gpuTrace,
-      color,
-      alpha: seriesAlpha(seriesIndex - 1),
-      lineWidth: LINE_WIDTH * pxRatio,
-      markerSize: hasMarkers(xValues, yValues) ? MARKER_SIZE * pxRatio : 0,
-      levelOfDetail: props.levelOfDetail
-    });
-  }
-
-  return res;
-};
-
-// Whether our traces are to be drawn using Canvas 2D rather than WebGL when our renderer is 'auto', based on how both
-// renderers perform in different browsers (using our demo's benchmark, which zooms, pans, plots live, and resizes our
-// traces):
-//  - Chrome: Canvas 2D is faster when it only needs to stroke a few points of a trace, thanks to our levels of detail
-//    (see linearPathPoints()), i.e. a few points per pixel column of a trace which X values are sorted (1.2 to 2.4
-//    times faster, including with many plots) or a few thousand points of a smooth trace which X values are not sorted
-//    (e.g., a phase plot, 3 to 5 times faster), but WebGL is faster when many points need to be stroked, from about
-//    300,000 points between our traces, e.g. traces that are too short for our level of detail to be used (e.g., 1.7
-//    to 5 times faster for 30 to 100 traces of 10,000 points) or a noisy trace which X values are not sorted;
-//  - Safari: like Chrome, except that WebGL is even faster whenever Canvas 2D needs to stroke many points, from about
-//    100,000 points between our traces (e.g., 1.3 to 3.8 times faster for 100 traces of 1,000 points, and 3.5 to 24
-//    times faster for 100 traces of 10,000 points). For 30 traces of 1,000,000 points, Canvas 2D is up to 1.3 times
-//    faster when they are all visible, but WebGL is up to 5.7 times faster when zoomed in; and
-//  - Firefox: Canvas 2D takes a very long time to stroke a dense trace that goes up and down (e.g., noisy data), so we
-//    fill the outline of such a trace instead (see linearPaths()), which is much faster (e.g., 86 to 107 FPS against 5
-//    to 10 FPS when panning three noisy traces of 1,000,000 points), but WebGL is faster still (e.g., 130 to 700 FPS).
-//    Canvas 2D is faster for smooth traces (1.5 to 4 times faster), but WebGL is never too slow (e.g., at least 78
-//    FPS in our benchmark, except for 30 noisy traces of 1,000,000 points, which are slow either way), while Canvas 2D
-//    can still be very slow (e.g., 3 to 85 FPS against 162 to 344 FPS using WebGL for 100 noisy traces of 1,000
-//    points, which are too short to be worth outlining, or for a dense trace whose X values are not sorted, i.e. which
-//    cannot be outlined), and telling smooth traces from noisy ones beforehand would only be a heuristic.
-// So, we use Canvas 2D in browsers other than Firefox, unless it would need to stroke at least
-// AUTO_WEBGL_MIN_CANVAS_POINTS points (AUTO_SAFARI_WEBGL_MIN_CANVAS_POINTS in Safari, as well as in any other browser
-// on iOS and iPadOS, since they all use WebKit) for our visible traces, i.e. all the points of a trace, unless our
-// level of detail is used for it (see linearPathPoints()), in which case at most AUTO_CANVAS_POINTS_PER_COLUMN points
-// per column if its X values are sorted, or the points of the level of our path level of detail that would be used
-// otherwise.
-// Note: we only check whether the X values of a trace are sorted (using its level of detail, see
-//       levelOfDetailUtils.ts) if our visible traces have enough points between them for it to matter, so that we
-//       don't create a level of detail for a trace that doesn't otherwise need one. Also, our path level of detail is
-//       the one that Canvas 2D uses, so we only build it once, whichever renderer we end up using.
-
-const AUTO_WEBGL_MIN_CANVAS_POINTS = 300000;
-const AUTO_SAFARI_WEBGL_MIN_CANVAS_POINTS = 100000;
-const AUTO_CANVAS_POINTS_PER_COLUMN = 4; // First, minimum, maximum, and last points of a column (see linearPath()).
-
-const userAgent = typeof navigator !== 'undefined' ? navigator.userAgent : '';
-const isFirefox = userAgent.includes('Firefox/');
-const isSafari =
-  userAgent.includes('Safari/') &&
-  !userAgent.includes('Chrome/') &&
-  !userAgent.includes('Chromium/') &&
-  !userAgent.includes('Android');
-const autoWebglMinCanvasPoints = isSafari ? AUTO_SAFARI_WEBGL_MIN_CANVAS_POINTS : AUTO_WEBGL_MIN_CANVAS_POINTS;
-
-const useCanvas2D = (u: uPlot): boolean => {
-  // Return whether our traces are to be drawn using Canvas 2D rather than WebGL (see above).
-
-  if (props.renderer !== 'auto') {
-    return props.renderer === 'canvas';
-  }
-
-  if (isFirefox) {
-    return false;
-  }
-
-  // Determine the number of points of our visible traces, and make sure that they have enough of them for our check to
-  // matter.
-
-  const area = pathArea(u);
-
-  if (!area) {
-    return true;
-  }
-
-  const visibleTraces: [traceIndex: number, xValues: Float64Array, yValues: Float64Array, nbOfPoints: number][] = [];
-  let nbOfPoints = 0;
-
-  for (let seriesIndex = 1; seriesIndex < u.series.length; ++seriesIndex) {
-    const [xValues, yValues] = seriesData(u, seriesIndex) ?? [];
-
-    if (u.series[seriesIndex]?.show && xValues && yValues) {
-      const nbOfTracePoints = Math.min(xValues.length, yValues.length);
-
-      visibleTraces.push([seriesIndex - 1, xValues, yValues, nbOfTracePoints]);
-
-      nbOfPoints += nbOfTracePoints;
-    }
-  }
-
-  if (nbOfPoints < autoWebglMinCanvasPoints) {
-    return true;
-  }
-
-  // Determine the number of points that Canvas 2D would need to stroke for our visible traces, i.e. all the points of a
-  // trace, unless our levels of detail would be used for it (see linearPathPoints()).
-
-  const nbOfColumns = Math.ceil(area.width) + 1;
-  const minNbOfPoints = levelOfDetailUtils.MIN_POINTS_PER_COLUMN * nbOfColumns;
-  const maxNbOfLodPoints = AUTO_CANVAS_POINTS_PER_COLUMN * nbOfColumns;
-  let nbOfCanvasPoints = 0;
-
-  for (const [traceIndex, xValues, yValues, nbOfTracePoints] of visibleTraces) {
-    if (!props.levelOfDetail || nbOfTracePoints <= minNbOfPoints) {
-      nbOfCanvasPoints += nbOfTracePoints;
-    } else if (updatedTraceLod(traceIndex, xValues, yValues, nbOfTracePoints).sortedLength === nbOfTracePoints) {
-      nbOfCanvasPoints += maxNbOfLodPoints;
-    } else {
-      nbOfCanvasPoints +=
-        canvasPathLevel(traceIndex, xValues, yValues, nbOfTracePoints, area)?.count ?? nbOfTracePoints;
-    }
-  }
-
-  return nbOfCanvasPoints < autoWebglMinCanvasPoints;
-};
-
-const prepareFrame = (u: uPlot): void => {
-  // Determine how our traces are to be drawn (see Note #1 above) and, if they are to be drawn using WebGL, keep track
-  // of what we need to draw.
-
-  const previousFrameRenderer = frameRenderer;
-  const area = pathArea(u);
-  const canvas2D = useCanvas2D(u);
-
-  frameRenderer = 'canvas';
-  gpuFrameItems = [];
-
-  // Cancel the copy of what our GPU plot renderer rendered for our previous frame, if it is still pending, since it
-  // would otherwise end up on top of our new frame (see Note #8 of gpuPlotRenderer.ts).
-
-  gpuPlotRenderer.cancelRender(u.ctx);
-
-  // Dispose of the GPU traces that we don't need anymore, i.e. those of the traces that we don't have anymore or all of
-  // them if our traces are to be drawn using Canvas 2D (in which case they would only use memory, both on the GPU and
-  // for their level of detail).
-  // Note: we keep our GPU traces if WebGL is to be used, even if our traces get drawn using Canvas 2D (e.g., if WebGL
-  //       is not precise enough for our current ranges), since we will need them again (e.g., once we zoom out).
-
-  disposeGpuTraces(canvas2D ? 0 : u.series.length - 1);
+const forgetRemovedTraces = (u: uPlot): void => {
+  // Forget about the levels of detail and hover searches of the traces that we don't have anymore (e.g., if our data
+  // now has fewer traces), so that they don't keep using memory.
+  // Note: this gets called before our plot gets drawn (see the drawClear hook in createPlot()).
 
   pathLods = pathLods.slice(0, u.series.length - 1);
   traceLods = traceLods.slice(0, u.series.length - 1);
   hoverSearches = hoverSearches.slice(0, u.series.length - 1);
-
-  if (!canvas2D) {
-    if (gpuPlotRenderer.isAvailable()) {
-      warnedAboutWebGlNotBeingAvailable = false;
-
-      if (area) {
-        const items = gpuFrameItemsOf(u);
-
-        if (isGpuPlotPrecise(area, items)) {
-          frameRenderer = 'webgl';
-          gpuFrameItems = items;
-        }
-      }
-    } else if (props.renderer === 'webgl') {
-      frameRenderer = 'none';
-
-      if (!warnedAboutWebGlNotBeingAvailable) {
-        warnedAboutWebGlNotBeingAvailable = true;
-
-        console.warn("@opencor/plot: WebGL is not available, so our traces cannot be drawn (our renderer is 'webgl').");
-      }
-    }
-  }
-
-  activeRenderer.value = frameRenderer;
-
-  // Invalidate the paths of our traces if we have switched between drawing them using Canvas 2D and not.
-
-  if ((frameRenderer === 'canvas') !== (previousFrameRenderer === 'canvas')) {
-    for (const series of u.series as unknown as { _paths: unknown }[]) {
-      series._paths = null;
-    }
-  }
-};
-
-const drawGpuTraces = (u: uPlot): void => {
-  // Draw our traces using WebGL, if needed.
-
-  if (frameRenderer !== 'webgl') {
-    return;
-  }
-
-  const area = pathArea(u);
-
-  if (area && gpuPlotRenderer.render(u.ctx, area, gpuFrameItems, gpuPointCounts)) {
-    return;
-  }
-
-  // We couldn't draw our traces using WebGL (e.g., our WebGL context got lost in the meantime), so redraw our plot,
-  // which will draw them using Canvas 2D or not at all (see prepareFrame()).
-
-  queueMicrotask(() => {
-    if (plot === u) {
-      u.redraw(true);
-    }
-  });
 };
 
 // The last point of our visible traces when our data is live (e.g., while a simulation is running), which is shown
@@ -5214,7 +4916,7 @@ const hoveredIndex = (
 ): number => {
   // Return the index of the point of the given trace that gets hovered, if any, i.e. the finite point which X value is
   // the closest to the mouse pointer (within HOVER_DISTANCE pixels) if the X values of its finite points are sorted
-  // (see Note #8 of levelOfDetailUtils.ts), or its finite point that is the closest to the mouse pointer (within
+  // (see Note #7 of levelOfDetailUtils.ts), or its finite point that is the closest to the mouse pointer (within
   // HOVER_DISTANCE pixels) otherwise.
   // Note: like Plotly (see its scatter hoverPoints() and Fx.getClosest()), the distance between the mouse pointer and a
   //       point is reduced by the "radius" of the point (i.e. the radius of its marker, if any, or HOVER_LINE_RADIUS
@@ -5651,7 +5353,7 @@ const createPlot = (width: number, height: number): void => {
       width: LINE_WIDTH,
       paths: linearPaths,
       points: {
-        show: (u: uPlot, seriesIndex: number) => frameRenderer === 'canvas' && seriesHasMarkers(u, seriesIndex),
+        show: seriesHasMarkers,
         paths: markerPaths,
         size: MARKER_SIZE,
         width: 0 // Note: this means that our markers are filled using the trace's colour.
@@ -5757,10 +5459,9 @@ const createPlot = (width: number, height: number): void => {
       ],
       series,
       hooks: {
-        drawClear: [prepareFrame],
+        drawClear: [forgetRemovedTraces],
         draw: [
           (u: uPlot) => {
-            drawGpuTraces(u);
             updatePlotRect(u);
             updateLivePoints(u);
             updateMarginsAsync();
@@ -5953,15 +5654,6 @@ vue.onMounted(() => {
     syncLegendWidth();
   });
 
-  // Redraw our plot when our GPU plot renderer becomes unavailable (e.g., when the GPU gets reset) or available again,
-  // so that our traces get drawn using Canvas 2D (or not at all) or using WebGL again, if needed, straight away (rather
-  // than the next time our plot gets drawn, e.g., when it gets zoomed). This also means that activeRenderer is always
-  // up to date.
-
-  stopListeningToGpuAvailabilityChanges = gpuPlotRenderer.onAvailabilityChange(() => {
-    plot?.redraw(true);
-  });
-
   // Start tracking whether the system uses light mode.
 
   if (prefersColorScheme) {
@@ -6005,11 +5697,6 @@ vue.onBeforeUnmount(() => {
   plot?.destroy();
 
   plot = undefined;
-
-  // Release our data from the GPU.
-
-  stopListeningToGpuAvailabilityChanges?.();
-  disposeGpuTraces();
 });
 
 vue.onUnmounted(() => {
@@ -6053,11 +5740,10 @@ vue.watch(
   }
 );
 
-// Redraw our plot when our renderer changes, so that our traces get drawn using it (see prepareFrame()), or when we are
-// to use our level of detail or not.
+// Redraw our plot when we are to use our level of detail or not.
 
 vue.watch(
-  () => [props.renderer, props.levelOfDetail],
+  () => props.levelOfDetail,
   () => {
     plot?.redraw(true);
   }

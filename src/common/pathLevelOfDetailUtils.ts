@@ -54,11 +54,11 @@
 //          of points when we update it, as well as our finer levels (since our levels have more and more points as they
 //          get finer). This means that our levels use, at most, about as much memory as the indices of the points of
 //          our trace. A dropped level only comes back if our levels get rebuilt (see Note #6).
-// Note #8: like our (column) level of detail (see Note #9 of levelOfDetailUtils.ts), we keep track of the X and Y
+// Note #8: like our (column) level of detail (see Note #8 of levelOfDetailUtils.ts), we keep track of the X and Y
 //          values that we were last updated with, so that when we get updated with some values that are not a
 //          continuation of them (see traceValues.ts), we start again from scratch, and otherwise only from our last
 //          point (which may have changed), unless they are the very same values (i.e. the same arrays), which we assume
-//          haven't changed, since we may be shared (e.g., by the two renderers of a plot).
+//          haven't changed (e.g., when a plot gets redrawn without its data having changed).
 
 import { isContinuationOf } from './traceValues';
 
@@ -127,7 +127,6 @@ export interface PathLevelOfDetail {
   yMin: number;
   yMax: number;
   levels: PathLevel[]; // Our levels, from the coarsest one (i.e. level 0) to the finest one that we have kept.
-  version: number; // Incremented whenever our levels may have changed (e.g., so that a consumer can cache them).
   xValues: Float64Array | undefined; // X values that we were last updated with (see Note #8 above).
   yValues: Float64Array | undefined; // Y values that we were last updated with.
 }
@@ -144,7 +143,6 @@ export const create = (): PathLevelOfDetail => {
     yMin: Number.POSITIVE_INFINITY,
     yMax: Number.NEGATIVE_INFINITY,
     levels: [],
-    version: 0,
     xValues: undefined,
     yValues: undefined
   };
@@ -163,14 +161,13 @@ export const memoryUsage = (lod: PathLevelOfDetail): number => {
 };
 
 const reset = (lod: PathLevelOfDetail): void => {
-  // Reset the given level of detail, keeping track of the fact that its levels may have changed, and of the values that
-  // it was last updated with (since it gets reset while being updated, see update()).
+  // Reset the given level of detail, keeping track of the values that it was last updated with (since it gets reset
+  // while being updated, see update()).
 
-  const { version, xValues, yValues } = lod;
+  const { xValues, yValues } = lod;
 
   Object.assign(lod, create());
 
-  lod.version = version + 1;
   lod.xValues = xValues;
   lod.yValues = yValues;
 };
@@ -336,8 +333,6 @@ export const update = (lod: PathLevelOfDetail, xValues: Float64Array, yValues: F
   if (lod.count >= count) {
     return;
   }
-
-  ++lod.version;
 
   if (lod.xSize === 0) {
     rebuild(lod, xValues, yValues, count);

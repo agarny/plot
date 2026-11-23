@@ -1,13 +1,12 @@
 // The level of detail of a trace, i.e. the points of a trace that we need to draw so that it looks the same as if all
-// of its points were drawn (see gpuPlotRenderer.ts).
+// of its points were drawn (see linearPathPoints() in PlotWidget.vue).
 // Note #1: a trace may have millions of points, i.e. many more than there are pixel columns in a plot. However, if the
 //          X values of a trace are sorted, then the points that fall within a pixel column get drawn as a vertical line
 //          that goes from their minimum to their maximum Y value, and that is connected to the previous and next pixel
 //          columns through their first and last points. So, rather than draw all the points of a pixel column, we only
 //          need to draw (in order) its first point, the points with its minimum and maximum Y values, and its last
 //          point (this is known as M4 aggregation). This means that drawing a trace costs O(number of pixel columns)
-//          rather than O(number of points). (Our columns don't have to be pixel columns, e.g. our GPU plot renderer
-//          uses several columns per pixel, see Note #7 of gpuPlotRenderer.ts.)
+//          rather than O(number of points).
 // Note #2: to find the points with the minimum and maximum Y values of a range of points quickly, we keep, for each
 //          block of BLOCK_SIZE points, the index of its finite point with the minimum (and maximum) Y value, and
 //          whether it has a gap (i.e. a point with a non-finite X or Y value). We then do the same for each block of
@@ -33,21 +32,19 @@
 //          running, with a fixed X range), then we only select the points of the columns from the one that contains
 //          the first point that may have changed, i.e. drawing a few more points costs O(number of new points) rather
 //          than O(number of columns).
-// Note #7: a level of detail may be shared (e.g., by the two renderers of a plot), so each selection has a number, so
-//          that a consumer can tell whether a selection directly follows the one it last used (in which case only its
-//          points from firstChanged onwards may differ from it) or not (in which case all of them may differ).
-// Note #8: a gap may have a non-finite X value (e.g., a logarithmic X axis and a non-positive X value), or a finite X
+// Note #7: a gap may have a non-finite X value (e.g., a logarithmic X axis and a non-positive X value), or a finite X
 //          value that is anywhere (since it doesn't get drawn), so only the X values of our finite points need to be
 //          sorted. This means that, when looking for the first point that is in a given column, we look at the first
 //          finite point from a given point, skipping our gaps as described in Note #4 (i.e. the gaps between two finite
 //          points belong to the column of the second one).
-// Note #9: we keep track of the X and Y values that we were last updated with, so that when we get updated with some
+// Note #8: we keep track of the X and Y values that we were last updated with, so that when we get updated with some
 //          values that are not a continuation of them (see traceValues.ts), we process all of them again, and otherwise
 //          only from our last point (which may have changed), unless they are the very same values (i.e. the same
 //          arrays), which we assume haven't changed (e.g., when a plot gets redrawn without its data having changed).
-//          This matters since we may be shared (e.g., by the two renderers of a plot), i.e. we may have been last
-//          updated by another of our users, and with other values (e.g., if the traces of a plot have changed in the
-//          meantime), so a user cannot rely on the values that it last updated us with.
+//          This matters since we may be shared (e.g., by the Canvas 2D path and the hover of a plot, see
+//          PlotWidget.vue), i.e. we may have been last updated by another of our users, and with other values (e.g., if
+//          the traces of a plot have changed in the meantime), so a user cannot rely on the values that it last updated
+//          us with.
 
 import { isContinuationOf } from './traceValues';
 
@@ -64,24 +61,22 @@ interface Level {
 export interface LevelOfDetailSelection {
   indices: Int32Array; // Index of our selected points.
   nbOfPoints: number; // Number of our selected points.
-  firstChanged: number; // Number of leading selected points that are the same as in our previous selection.
+  firstChanged: number; // Number of leading selected points kept from our previous selection (see Note #6 above).
   xMin: number; // Minimum X value of the X range for which our points were selected.
   xMax: number; // Maximum X value of the X range for which our points were selected.
   nbOfColumns: number; // Number of columns into which our X range was split.
   start: number; // Index of the first point (included) of the range of points from which our points were selected.
   end: number; // Index of the last point (excluded) of the range of points from which our points were selected.
   validCount: number; // Number of leading points that haven't changed since our points were selected.
-  number: number; // Number of our selection, i.e. of the selections made by our level of detail (see Note #7 above).
 }
 
 export interface LevelOfDetail {
-  xValues: Float64Array | undefined; // X values that we were last updated with (see Note #9 above).
+  xValues: Float64Array | undefined; // X values that we were last updated with (see Note #8 above).
   yValues: Float64Array | undefined; // Y values that we were last updated with.
   count: number; // Number of points that we have processed.
-  sortedLength: number; // Number of leading points whose finite points have sorted X values (see Note #8 above).
+  sortedLength: number; // Number of leading points whose finite points have sorted X values (see Note #7 above).
   levels: Level[]; // Our blocks of BLOCK_SIZE points, of BLOCK_SIZE^2 points, etc.
   selection: LevelOfDetailSelection | undefined; // Our last selection of points (see selectPoints()).
-  nbOfSelections: number; // Number of selections that we have made (see Note #7 above).
 }
 
 export const create = (): LevelOfDetail => {
@@ -91,8 +86,7 @@ export const create = (): LevelOfDetail => {
     count: 0,
     sortedLength: 0,
     levels: [],
-    selection: undefined,
-    nbOfSelections: 0
+    selection: undefined
   };
 };
 
@@ -195,9 +189,9 @@ const previousFinitePoint = (
 };
 
 export const update = (lod: LevelOfDetail, xValues: Float64Array, yValues: Float64Array, count: number): void => {
-  // Process the given points from the first one that may have changed since we were last updated (see Note #9 above),
+  // Process the given points from the first one that may have changed since we were last updated (see Note #8 above),
   // or that we haven't processed (see invalidate()).
-  // Note #1: like convertPoints() in gpuPlotRenderer.ts, our loops only use local variables, so that they are fast.
+  // Note #1: our loops only use local variables, so that they are fast.
   // Note #2: we use x - x === 0 to check whether x is finite since it is faster than Number.isFinite().
 
   if (xValues !== lod.xValues || yValues !== lod.yValues) {
@@ -309,7 +303,7 @@ export const update = (lod: LevelOfDetail, xValues: Float64Array, yValues: Float
 
   lod.levels.length = nbOfLevels;
 
-  // Determine how many of our leading points have sorted X values for their finite points (see Note #8 above), carrying
+  // Determine how many of our leading points have sorted X values for their finite points (see Note #7 above), carrying
   // on from the last finite point that we have already processed, if any.
 
   let sortedLength = lod.sortedLength;
@@ -583,7 +577,7 @@ export const visibleRange = (
   xMin: number,
   xMax: number
 ): [start: number, end: number] => {
-  // Return the range of the given points (whose finite points must have sorted X values, see Note #8 above) that we
+  // Return the range of the given points (whose finite points must have sorted X values, see Note #7 above) that we
   // need to draw for the given X range, i.e. the points within that range, as well as the points just before and after
   // it (so that our trace goes all the way to the edges of our plotting area).
   // Note: our level of detail must be up to date (see update()).
@@ -602,7 +596,7 @@ export const neighbouringPoints = (
   x: number
 ): [before: number, after: number] => {
   // Return the index of the last finite point, of the given points (whose finite points must have sorted X values, see
-  // Note #8 above), that has an X value less than the given X value (or -1 if there is none), and the index of the
+  // Note #7 above), that has an X value less than the given X value (or -1 if there is none), and the index of the
   // first finite point that has an X value not less than it (or the given number of points if there is none), e.g. so
   // that we can determine the point that gets hovered.
   // Note #1: our level of detail must be up to date (see update()).
@@ -932,8 +926,7 @@ export const selectPoints = (
       nbOfColumns,
       start,
       end,
-      validCount: 0,
-      number: 0
+      validCount: 0
     };
 
     iteration = 0;
@@ -977,7 +970,6 @@ export const selectPoints = (
   selection.start = start;
   selection.end = end;
   selection.validCount = Number.POSITIVE_INFINITY;
-  selection.number = ++lod.nbOfSelections;
 
   lod.selection = selection;
 

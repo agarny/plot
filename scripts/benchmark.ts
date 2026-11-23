@@ -1,16 +1,15 @@
 #!/usr/bin/env bun
 
-// Benchmark our plot in Chrome, Firefox, and/or Safari, for different scenarios and renderers, using the benchmark of
-// our demo (see runBenchmark() and demoBenchmark in demo/App.vue), and save its results as a report (in HTML, Markdown,
-// and JSON, see the Benchmarking section of README.md).
+// Benchmark our plot in Chrome, Firefox, and/or Safari, for different scenarios, using the benchmark of our demo (see
+// runBenchmark() and demoBenchmark in demo/App.vue), and save its results as a report (in HTML, Markdown, and JSON, see
+// the Benchmarking section of README.md).
 // Note #1: we build our demo and serve it (rather than use our development server), so that our plot gets benchmarked
 //          as it gets used (e.g., without Vue's development checks).
 // Note #2: we drive Chrome and Firefox using Puppeteer, and Safari using safaridriver (i.e. WebDriver), which comes
 //          with Safari but needs to be enabled first (see README.md).
 // Note #3: unless --capped is given, the frame rate of Chrome and Firefox is not capped by the refresh rate of the
-//          display, so that it tells us how fast our plot can redraw itself (including the GPU time of WebGL, which is
-//          not included in our redraw times). The frame rate of Safari cannot be uncapped, so its redraw times are what
-//          tell us how fast our plot is.
+//          display, so that it tells us how fast our plot can redraw itself. The frame rate of Safari cannot be
+//          uncapped, so its redraw times are what tell us how fast our plot is.
 // Note #4: Chrome is headless by default, but not Firefox, since headless Firefox doesn't draw using the GPU (e.g.,
 //          Canvas 2D is about 4 times slower) and caps its frame rate.
 
@@ -25,9 +24,9 @@ import * as vite from 'vite';
 
 import { BENCHMARK_INTERACTIONS, type BenchmarkReport, type BenchmarkScenario } from '../demo/benchmark';
 
-// Our scenarios, i.e. what we benchmark for each of our renderers.
+// Our scenarios, i.e. what we benchmark.
 
-interface Scenario extends Omit<BenchmarkScenario, 'renderer'> {
+interface Scenario extends BenchmarkScenario {
   id: string;
 }
 
@@ -50,14 +49,12 @@ const SCENARIOS: Scenario[] = [
 ];
 
 const BROWSERS = ['chrome', 'firefox', 'safari'] as const;
-const RENDERERS = ['auto', 'canvas', 'webgl'] as const;
 const WINDOW_WIDTH = 1400;
 const WINDOW_HEIGHT = 900;
 const DEVICE_SCALE_FACTOR = 2; // Device pixel ratio of Chrome and Firefox (Safari uses the one of the display).
 const TIMEOUT = 30 * 60 * 1000; // Maximum time (in milliseconds) that a scenario may take.
 
 type BrowserName = (typeof BROWSERS)[number];
-type RendererName = (typeof RENDERERS)[number];
 
 // Our command line options.
 
@@ -67,8 +64,7 @@ Options:
   --browsers <names>     Browsers to use: ${BROWSERS.join(', ')} (default: all of them, Safari only on macOS,
                          skipping those that cannot be launched)
   --scenarios <ids>      Scenarios to run (default: all of them, see --list)
-  --renderers <names>    Renderers to use: ${RENDERERS.join(', ')} (default: canvas,webgl)
-  --capped               Cap the frame rate of Chrome and Firefox to the refresh rate of the display
+  --capped              Cap the frame rate of Chrome and Firefox to the refresh rate of the display
   --headed               Show Chrome (Firefox and Safari are always shown, see Note #4 above)
   --chrome-path <path>   Path to Chrome (default: the installed stable version of Chrome)
   --firefox-path <path>  Path to Firefox (default: the usual location of Firefox on this platform)
@@ -94,7 +90,6 @@ const parsedArgs = (() => {
       options: {
         browsers: { type: 'string' },
         scenarios: { type: 'string' },
-        renderers: { type: 'string', default: 'canvas,webgl' },
         capped: { type: 'boolean', default: false },
         headed: { type: 'boolean', default: false },
         'chrome-path': { type: 'string' },
@@ -146,7 +141,6 @@ if (options.list) {
 const browserNames = options.browsers
   ? listOption('browser', options.browsers, BROWSERS)
   : BROWSERS.filter((browser) => browser !== 'safari' || process.platform === 'darwin');
-const rendererNames = listOption('renderer', options.renderers, RENDERERS);
 const scenarioIds = options.scenarios
   ? listOption(
       'scenario',
@@ -167,6 +161,8 @@ interface BenchmarkBrowser {
 
 // What we evaluate in our demo, i.e. the description of our browser and the running of our benchmark (as the body of a
 // function, so that it can be used with both Puppeteer and WebDriver).
+// Note: the description of our browser includes its GPU (which Canvas 2D uses, if it is accelerated), which only WebGL
+//       can tell us.
 
 const DESCRIPTION_SCRIPT = `
   const context = document.createElement('canvas').getContext('webgl2');
@@ -441,14 +437,12 @@ const safariBrowser = async (url: string): Promise<BenchmarkBrowser> => {
 
 // Our report, i.e. our results for each of our browsers, which we save as HTML (to be opened in a browser), Markdown
 // (e.g., to be pasted in an issue), and JSON (e.g., to be compared with other results), as we get them.
-// Note: for each scenario and interaction, we highlight the renderer that did best, i.e. the one with the highest frame
-//       rate if our frame rate is not capped, or the one with the lowest redraw time otherwise (see Note #3 above).
 
 interface BrowserResults {
   browser: BrowserName;
   description: string;
   capped: boolean;
-  results: { scenario: string; renderer: RendererName; report: BenchmarkReport }[];
+  results: { scenario: string; report: BenchmarkReport }[];
 }
 
 const report: BrowserResults[] = [];
@@ -457,34 +451,7 @@ const formatTime = (time: number): string => {
   return time.toFixed(1);
 };
 
-const bestRenderers = (browserResults: BrowserResults, scenario: string, interaction: string): Set<RendererName> => {
-  // Return the renderer(s) that did best for the given scenario and interaction, if we have results for several
-  // renderers.
-
-  const results = browserResults.results.filter((result) => result.scenario === scenario);
-  const scores = results.map((result) => {
-    const interactionResult = result.report.results[interaction];
-
-    if (!interactionResult) {
-      return Number.NaN;
-    }
-
-    return browserResults.capped ? -interactionResult.redraw : Math.round(interactionResult.fps);
-  });
-  const bestScore = Math.max(...scores.filter((score) => !Number.isNaN(score)));
-
-  return new Set(
-    results.length > 1 ? results.filter((_, index) => scores[index] === bestScore).map((result) => result.renderer) : []
-  );
-};
-
-const HEADERS = [
-  'Scenario',
-  'Renderer',
-  'Drawn using',
-  'First draw',
-  ...BENCHMARK_INTERACTIONS.map(([, label]) => label)
-];
+const HEADERS = ['Scenario', 'First draw', ...BENCHMARK_INTERACTIONS.map(([, label]) => label)];
 
 const browserTitle = (browserResults: BrowserResults): string => {
   const name = browserResults.browser.charAt(0).toUpperCase() + browserResults.browser.slice(1);
@@ -496,7 +463,7 @@ const markdownReport = (date: Date): string => {
   const lines = [
     '# OpenCOR Plot benchmark',
     '',
-    `${date.toLocaleString('en')}. Each cell is the frame rate and the average/95th percentile redraw time, with the renderer that did best in bold.`
+    `${date.toLocaleString('en')}. Each cell is the frame rate and the average/95th percentile redraw time.`
   ];
 
   for (const browserResults of report) {
@@ -506,8 +473,6 @@ const markdownReport = (date: Date): string => {
     for (const result of browserResults.results) {
       const cells = [
         result.scenario,
-        result.renderer,
-        result.report.drawnUsing,
         `${Math.round(result.report.firstDraw)} ms`,
         ...BENCHMARK_INTERACTIONS.map(([name]) => {
           const interactionResult = result.report.results[name];
@@ -516,9 +481,7 @@ const markdownReport = (date: Date): string => {
             return '—';
           }
 
-          const text = `${Math.round(interactionResult.fps)} FPS, ${formatTime(interactionResult.redraw)}/${formatTime(interactionResult.redraw95)} ms`;
-
-          return bestRenderers(browserResults, result.scenario, name).has(result.renderer) ? `**${text}**` : text;
+          return `${Math.round(interactionResult.fps)} FPS, ${formatTime(interactionResult.redraw)}/${formatTime(interactionResult.redraw95)} ms`;
         })
       ];
 
@@ -535,9 +498,7 @@ const escapeHtml = (text: string): string => {
 
 const htmlReport = (date: Date): string => {
   const sections = report.map((browserResults) => {
-    const rows = browserResults.results.map((result, index) => {
-      const previousResult = browserResults.results[index - 1];
-      const newScenario = previousResult?.scenario !== result.scenario;
+    const rows = browserResults.results.map((result) => {
       const cells = BENCHMARK_INTERACTIONS.map(([name]) => {
         const interactionResult = result.report.results[name];
 
@@ -545,12 +506,10 @@ const htmlReport = (date: Date): string => {
           return '<td>—</td>';
         }
 
-        const best = bestRenderers(browserResults, result.scenario, name).has(result.renderer);
-
-        return `<td${best ? ' class="best"' : ''}><span class="fps">${Math.round(interactionResult.fps)} FPS</span><span class="redraw">${formatTime(interactionResult.redraw)} / ${formatTime(interactionResult.redraw95)} ms</span></td>`;
+        return `<td><span class="fps">${Math.round(interactionResult.fps)} FPS</span><span class="redraw">${formatTime(interactionResult.redraw)} / ${formatTime(interactionResult.redraw95)} ms</span></td>`;
       });
 
-      return `<tr${newScenario ? ' class="new-scenario"' : ''}><th scope="row">${newScenario ? escapeHtml(result.scenario) : ''}</th><td>${escapeHtml(result.renderer)}</td><td>${escapeHtml(result.report.drawnUsing)}</td><td>${Math.round(result.report.firstDraw)} ms</td>${cells.join('')}</tr>`;
+      return `<tr><th scope="row">${escapeHtml(result.scenario)}</th><td>${Math.round(result.report.firstDraw)} ms</td>${cells.join('')}</tr>`;
     });
 
     return `<section>
@@ -580,8 +539,6 @@ const htmlReport = (date: Date): string => {
     --text: #1e293b;
     --muted: #64748b;
     --border: #e2e8f0;
-    --best: #d1fae5;
-    --best-text: #065f46;
   }
 
   @media (prefers-color-scheme: dark) {
@@ -590,8 +547,6 @@ const htmlReport = (date: Date): string => {
       --text: #f4f4f5;
       --muted: #a1a1aa;
       --border: #3f3f46;
-      --best: #064e3b;
-      --best-text: #a7f3d0;
     }
   }
 
@@ -611,17 +566,14 @@ const htmlReport = (date: Date): string => {
   table { border-collapse: collapse; font-variant-numeric: tabular-nums; }
   th, td { padding: 6px 10px; border-bottom: 1px solid var(--border); text-align: left; white-space: nowrap; vertical-align: top; }
   thead th { position: sticky; top: 0; background: var(--background); color: var(--muted); font-weight: 600; }
-  tbody tr.new-scenario > * { border-top: 2px solid var(--border); }
-  td.best { background: var(--best); color: var(--best-text); }
   .fps { display: block; font-weight: 600; }
   .redraw { display: block; color: var(--muted); font-size: 12px; }
-  td.best .redraw { color: inherit; }
 </style>
 </head>
 <body>
 <h1>OpenCOR Plot benchmark</h1>
 <p>${escapeHtml(date.toLocaleString('en'))}</p>
-<p>Each cell is the frame rate and, below it, the average / 95th percentile of the redraw time. The renderer that did best for a scenario and interaction is highlighted: the one with the highest frame rate if it is uncapped, or the one with the lowest redraw time otherwise. See the Benchmarking section of README.md for how to read these results.</p>
+<p>Each cell is the frame rate and, below it, the average / 95th percentile of the redraw time. See the Benchmarking section of README.md for how to read these results.</p>
 ${sections.join('\n')}
 </body>
 </html>
@@ -735,19 +687,13 @@ try {
       report.push(browserResults);
 
       for (const scenario of scenarios) {
-        for (const renderer of rendererNames) {
-          console.log(`  Running ${scenario.id} with ${renderer}...`);
+        console.log(`  Running ${scenario.id}...`);
 
-          const { id, ...benchmarkScenario } = scenario;
+        const { id, ...benchmarkScenario } = scenario;
 
-          browserResults.results.push({
-            scenario: id,
-            renderer,
-            report: await browser.run({ ...benchmarkScenario, renderer })
-          });
+        browserResults.results.push({ scenario: id, report: await browser.run(benchmarkScenario) });
 
-          saveReport(date, reportBasePath);
-        }
+        saveReport(date, reportBasePath);
       }
     } finally {
       await browser.close();

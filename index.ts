@@ -8,8 +8,6 @@ export type {
   ContextMenuSeparator
 } from './src/widgets/ContextMenuWidget.vue';
 export type {
-  PlotActiveRenderer,
-  PlotRenderer,
   PlotTheme,
   PlotContextMenuEvent,
   PlotCsvExportEvent,

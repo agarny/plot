@@ -170,8 +170,8 @@ export const waitForNextPaint = async (): Promise<void> => {
 // cancelAnimationFrame()), except that all of our callbacks get called from the same animation frame callback.
 // Note #1: this means that the microtasks that our callbacks queue (e.g., to redraw a plot, which uPlot does in a
 //          microtask) only get run once all of our callbacks have been called, rather than after each of them, so that
-//          the work that gets done in those microtasks can be batched (e.g., our GPU plot renderer only waits for the
-//          GPU once for all of our plots, see Note #8 of gpuPlotRenderer.ts).
+//          the work that gets done in those microtasks gets batched (e.g., all of our plots get redrawn one after the
+//          other).
 // Note #2: like with requestAnimationFrame(), a callback that gets requested while our callbacks are being called gets
 //          called before the following repaint, a callback that gets cancelled while our callbacks are being called
 //          doesn't get called (if it hasn't been called yet), and an error thrown by a callback doesn't prevent our

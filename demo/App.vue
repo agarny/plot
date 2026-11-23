@@ -5,7 +5,6 @@
         <OpenCORPlot :ref="(plot) => setPlotRef(plot, index)"
           :data="data"
           :theme="instanceTheme(index)"
-          :renderer="renderer"
           :levelOfDetail="levelOfDetail"
           :live="liveRunning"
           :showLegend="showLegend"
@@ -126,14 +125,6 @@
             <option value="mixed">Mixed</option>
           </select>
         </label>
-        <label class="demo-field">
-          <span>Renderer</span>
-          <select v-model="renderer">
-            <option value="auto">Auto</option>
-            <option value="canvas">Canvas 2D</option>
-            <option value="webgl">WebGL</option>
-          </select>
-        </label>
         <label class="demo-check">
           <input v-model="levelOfDetail" type="checkbox" />
           Level of detail
@@ -150,7 +141,6 @@
       <section>
         <h2>Testing</h2>
         <button type="button" :disabled="benchmarking || !datasets.length" @click="runBenchmark">Benchmark</button>
-        <button type="button" :disabled="renderer === 'canvas' || webGlContextLost" @click="onLoseWebGlContext">Lose WebGL context</button>
       </section>
     </aside>
     <!--
@@ -178,8 +168,6 @@ import OpenCORPlot, {
   type PlotData,
   type PlotMargins,
   type PlotMemoryUsage,
-  type PlotActiveRenderer,
-  type PlotRenderer,
   type PlotTheme
 } from '../index';
 import {
@@ -191,7 +179,6 @@ import {
   type DemoBenchmark
 } from './benchmark';
 import { DATA_KINDS, type DataKind, plotData } from './data';
-import { loseWebGlContext, restoreWebGlContext } from './webgl';
 
 type PlotInstance = InstanceType<typeof OpenCORPlot>;
 
@@ -207,7 +194,6 @@ const nbOfTraces = vue.ref<number>(3);
 const nbOfPoints = vue.ref<number>(1000);
 const nbOfInstances = vue.ref<number>(1);
 const theme = vue.ref<PlotTheme | 'mixed'>('mixed');
-const renderer = vue.ref<PlotRenderer>('auto');
 const levelOfDetail = vue.ref<boolean>(true);
 const showLegend = vue.ref<boolean>(true);
 const customContextMenu = vue.ref<boolean>(false);
@@ -375,8 +361,7 @@ const xAxisRange = (data: PlotData): [number, number] => {
 
 const liveDatasets = (nbOfPoints: number, xAxisRanges: ([number, number] | undefined)[]): PlotData[] => {
   // Return our generated data, but with only the given number of points per trace, making sure that our traces still
-  // share their X values (since our GPU plot renderer handles each trace separately anyway, but it's what a consumer
-  // would do).
+  // share their X values (since it's what a consumer would do).
 
   return generatedDatasets.map((data, instance) => {
     const xViews = new Map<Float64Array, Float64Array>();
@@ -448,7 +433,7 @@ const startLive = (): void => {
 
 // Time to first draw, i.e. the time it takes from giving all of our data to our instances to them having drawn it (and
 // the browser having painted it), which includes the time it takes to (re)create our instances, to process our data
-// (see plotData() in PlotWidget.vue), and to draw it (e.g., uploading it to the GPU and building its level of detail).
+// (see plotData() in PlotWidget.vue), and to draw it (e.g., building its level of detail).
 
 const firstDrawStatus = vue.ref<string>(''); // Time to first draw of our data, if it was not plotted live.
 let firstDrawTime = 0; // Time to first draw of our data (in milliseconds), if it was not plotted live.
@@ -539,31 +524,23 @@ const onMarginsUpdated = (newMargins: PlotMargins, index: number): void => {
   }
 };
 
-// Our frame rate, the renderer(s) that our instances actually use to draw their traces, and the number of points that
-// they actually draw compared to their number of points (i.e. without level of detail), which we update twice a second
-// (rather than reactively, which would be costly with many instances).
+// Our frame rate, and the number of points that our instances actually draw compared to their number of points (i.e.
+// without level of detail), which we update twice a second (rather than reactively, which would be costly with many
+// instances).
 
-const ACTIVE_RENDERER_NAMES: Record<PlotActiveRenderer, string> = {
-  canvas: 'Canvas 2D',
-  webgl: 'WebGL',
-  none: 'nothing (WebGL is not available)'
-};
 const FPS_UPDATE_INTERVAL = 500;
 
 const fps = vue.ref<number>(0);
-const activeRenderers = vue.ref<string>('');
 const plottedPoints = vue.ref<string>('');
 const drawnPoints = vue.ref<string>('');
 const lodMemoryStatus = vue.ref<string>(''); // Memory used by the levels of detail of our instances.
 const logMemoryStatus = vue.ref<string>(''); // Memory used by the logarithm of the values of our instances.
-const gpuMemoryStatus = vue.ref<string>(''); // Memory used by our instances on the GPU.
 let fpsFrameId = 0;
 
 const updateDrawingStatus = (): void => {
-  const counts = new Map<PlotActiveRenderer, number>();
   let nbOfPoints = 0;
   let nbOfDrawnPoints = 0;
-  const memoryUsage: PlotMemoryUsage = { levelOfDetail: 0, logValues: 0, gpu: 0 };
+  const memoryUsage: PlotMemoryUsage = { levelOfDetail: 0, logValues: 0 };
 
   for (const plot of plotRefs.slice(0, datasets.value.length)) {
     if (plot) {
@@ -572,9 +549,6 @@ const updateDrawingStatus = (): void => {
 
       memoryUsage.levelOfDetail += plotMemoryUsage.levelOfDetail;
       memoryUsage.logValues += plotMemoryUsage.logValues;
-      memoryUsage.gpu += plotMemoryUsage.gpu;
-
-      counts.set(plot.activeRenderer, (counts.get(plot.activeRenderer) ?? 0) + 1);
 
       nbOfPoints += pointCounts.nbOfPoints;
       nbOfDrawnPoints += pointCounts.nbOfDrawnPoints;
@@ -588,13 +562,7 @@ const updateDrawingStatus = (): void => {
   plottedPoints.value = formatNumber(nbOfPoints);
   lodMemoryStatus.value = formatBytes(memoryUsage.levelOfDetail);
   logMemoryStatus.value = formatBytes(memoryUsage.logValues);
-  gpuMemoryStatus.value = formatBytes(memoryUsage.gpu);
   drawnPoints.value = `${formatNumber(nbOfDrawnPoints)}${nbOfPoints ? ` (${percentage(nbOfDrawnPoints / nbOfPoints)})` : ''}`;
-
-  activeRenderers.value =
-    counts.size === 1
-      ? ACTIVE_RENDERER_NAMES[counts.keys().next().value as PlotActiveRenderer]
-      : [...counts].map(([name, count]) => `${ACTIVE_RENDERER_NAMES[name]} (${count})`).join(', ');
 };
 
 vue.onMounted(() => {
@@ -621,7 +589,6 @@ vue.onMounted(() => {
 vue.onBeforeUnmount(() => {
   darkModeQuery.removeEventListener('change', onDarkModeChange);
   cancelAnimationFrame(fpsFrameId);
-  clearTimeout(webGlTimeoutId);
 
   stopLive();
   stopBenchmark();
@@ -655,12 +622,10 @@ vue.onBeforeUnmount(() => {
 //          handled. This includes everything that happens during the frame: our instances redrawing themselves,
 //          processing their new data (which they do once onFrameEnd() has returned), and the browser rendering the
 //          frame.
-// Note #3: WebGL draws asynchronously, so the GPU time of a frame is not (fully) included in the redraw time of our
-//          instances (but it limits our frame rate if our frame rate is not capped).
-// Note #4: we zoom our instances by sending wheel events to them (i.e. to the element of uPlot that handles them, or to
+// Note #3: we zoom our instances by sending wheel events to them (i.e. to the element of uPlot that handles them, or to
 //          their X axis dragger to only zoom along their X axis), we pan them by sending them arrow key presses (i.e.
 //          to their plotting area), and we reset their zoom between interactions by sending them a "0" key press.
-// Note #5: an arrow key press pans an axis by 10% of its length (see KEYBOARD_PAN_FRACTION in PlotWidget.vue), so
+// Note #4: an arrow key press pans an axis by 10% of its length (see KEYBOARD_PAN_FRACTION in PlotWidget.vue), so
 //          with a zoom of Z, our instances get from the middle of their data to one of its ends in 5 * (Z - 1) frames,
 //          and from one end to the other in 10 * (Z - 1) frames. Without any zoom, they get panned by half of their X
 //          range in 5 frames.
@@ -902,7 +867,7 @@ const runBenchmark = async (): Promise<void> => {
       return;
     }
 
-    // Pan our instances from the middle of their data to one of its ends, then to the other, and so on (see Note #5
+    // Pan our instances from the middle of their data to one of its ends, then to the other, and so on (see Note #4
     // above).
 
     const halfSweep = Math.max(5 * (zoom - 1), 5);
@@ -982,8 +947,8 @@ const runBenchmark = async (): Promise<void> => {
 // Our benchmark API, i.e. what our benchmark script (see scripts/benchmark.ts) uses to run our benchmark for a given
 // scenario, i.e. to set up our demo, wait for our data to be generated and drawn, run our benchmark, and report its
 // results.
-// Note: if our data doesn't need to be generated again (e.g., if only our renderer is different), then we show it
-//       again (i.e. we recreate our instances), so that our time to first draw is for the given scenario too.
+// Note: if our data doesn't need to be generated again (e.g., if we are run for the same scenario again), then we show
+//       it again (i.e. we recreate our instances), so that our time to first draw is for the given scenario too.
 
 const nextFrameUntil = (condition: () => boolean): Promise<void> => {
   return new Promise((resolve) => {
@@ -1016,7 +981,6 @@ const demoBenchmark: DemoBenchmark = {
     nbOfTraces.value = scenario.traces;
     nbOfPoints.value = scenario.points;
     nbOfInstances.value = scenario.instances;
-    renderer.value = scenario.renderer;
 
     await vue.nextTick();
 
@@ -1038,7 +1002,7 @@ const demoBenchmark: DemoBenchmark = {
 
     updateDrawingStatus();
 
-    return { results: benchmarkResults.value, drawnUsing: activeRenderers.value, firstDraw: firstDrawTime };
+    return { results: benchmarkResults.value, firstDraw: firstDrawTime };
   }
 };
 
@@ -1049,45 +1013,6 @@ vue.onMounted(() => {
 vue.onBeforeUnmount(() => {
   delete (window as unknown as { demoBenchmark?: DemoBenchmark }).demoBenchmark;
 });
-
-// Loss of our WebGL context, which we restore after a while, so that we can see our instances fall back to drawing
-// their traces using Canvas 2D (or not at all if our renderer is WebGL) and then use WebGL again (see webgl.ts).
-
-const WEBGL_CONTEXT_LOSS_DURATION = 3000; // Duration (in milliseconds) for which we lose our WebGL context.
-const WEBGL_STATUS_DURATION = 2000; // Duration (in milliseconds) for which we show that our WebGL context is restored.
-
-const webGlContextLost = vue.ref<boolean>(false); // Whether we have lost our WebGL context.
-const webGlStatus = vue.ref<string>(''); // Status of our WebGL context, if we have lost it or just restored it.
-let webGlTimeoutId: ReturnType<typeof setTimeout> | undefined; // Id of our timeout to restore or clear our status.
-
-const onLoseWebGlContext = (): void => {
-  // Lose our WebGL context, if it has been created (i.e. if WebGL has been used), and restore it after a while.
-
-  clearTimeout(webGlTimeoutId);
-
-  if (!loseWebGlContext()) {
-    webGlStatus.value = 'Not used';
-    webGlTimeoutId = setTimeout(() => {
-      webGlStatus.value = '';
-    }, WEBGL_STATUS_DURATION);
-
-    return;
-  }
-
-  webGlContextLost.value = true;
-  webGlStatus.value = `Lost (restoring it in ${WEBGL_CONTEXT_LOSS_DURATION / 1000} s)`;
-
-  webGlTimeoutId = setTimeout(() => {
-    restoreWebGlContext();
-
-    webGlContextLost.value = false;
-    webGlStatus.value = 'Restored';
-
-    webGlTimeoutId = setTimeout(() => {
-      webGlStatus.value = '';
-    }, WEBGL_STATUS_DURATION);
-  }, WEBGL_CONTEXT_LOSS_DURATION);
-};
 
 // CSV export progress.
 
@@ -1138,7 +1063,6 @@ vue.onMounted(() => {
 
 const statusRows = vue.computed(() => [
   { term: 'Frame rate', value: `${fps.value} FPS` },
-  { term: 'Drawn using', value: activeRenderers.value },
   { term: 'Points', value: plottedPoints.value },
   { term: 'Drawn points', value: drawnPoints.value },
   { term: 'Data', value: dataStatus.value },
@@ -1146,10 +1070,8 @@ const statusRows = vue.computed(() => [
   { term: 'Data memory', value: dataMemoryStatus.value },
   { term: 'LOD memory', value: lodMemoryStatus.value },
   { term: 'Log memory', value: logMemoryStatus.value },
-  { term: 'GPU memory', value: gpuMemoryStatus.value },
   { term: 'Live', value: liveStatus.value },
   ...benchmarkRows.value,
-  { term: 'WebGL context', value: webGlStatus.value },
   { term: 'CSV export', value: csvExportStatus.value }
 ]);
 

@@ -230,8 +230,7 @@ describe('create()', () => {
       count: 0,
       sortedLength: 0,
       levels: [],
-      selection: undefined,
-      nbOfSelections: 0
+      selection: undefined
     });
   });
 });
@@ -397,7 +396,7 @@ describe('update()', () => {
   it('processes all of its points again if they are not a continuation of the ones it was last updated with', () => {
     // A level of detail may be shared, so it may get updated with some values (e.g., by one of its users), then with
     // other values (e.g., by another of its users), and then with a continuation of the first values (e.g., by the
-    // first user again), in which case it must not keep what it did for the other values (see Note #9 of
+    // first user again), in which case it must not keep what it did for the other values (see Note #8 of
     // levelOfDetailUtils.ts).
 
     const random = randomGenerator(963);
@@ -441,7 +440,7 @@ describe('update()', () => {
 
   it('processes a continuation from its last point, and nothing for the very same values', () => {
     // Our last point may have changed in a continuation (e.g., a live simulation retrieves it again), but the very same
-    // values (i.e. the same arrays) are assumed not to have changed (see Note #9 of levelOfDetailUtils.ts).
+    // values (i.e. the same arrays) are assumed not to have changed (see Note #8 of levelOfDetailUtils.ts).
 
     const xBuffer = Float64Array.from({ length: 100 }, (_value, i) => i);
     const yBuffer = new Float64Array(100);
@@ -626,33 +625,6 @@ describe('neighbouringPoints()', () => {
 // selectPoints().
 
 describe('selectPoints()', () => {
-  it('numbers its selections', () => {
-    const nbOfPoints = 256;
-    const xValues = Float64Array.from({ length: nbOfPoints }, (_value, i) => i);
-    const lod = create();
-
-    update(lod, xValues, xValues, nbOfPoints);
-
-    // Our selections are numbered whether or not they reuse (some of) the previous one.
-
-    const selection = selectPoints(
-      lod,
-      xValues,
-      xValues,
-      0,
-      nbOfPoints,
-      0,
-      nbOfPoints - 1,
-      10
-    ) as LevelOfDetailSelection;
-
-    expect(selection.number).toBe(1);
-
-    expect(selectPoints(lod, xValues, xValues, 0, nbOfPoints, 0, nbOfPoints - 1, 10)?.number).toBe(2);
-    expect(selectPoints(lod, xValues, xValues, 0, nbOfPoints, 0, nbOfPoints - 1, 20)?.number).toBe(3);
-    expect(lod.nbOfSelections).toBe(3);
-  });
-
   it('selects the points needed to draw some points, with or without gaps', () => {
     // Check our selection for different numbers of points (so that we have up to five levels of blocks), with or
     // without gaps, X ranges, and numbers of columns.
