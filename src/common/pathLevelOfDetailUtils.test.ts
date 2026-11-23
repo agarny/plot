@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 
+import { isFinitePoint, randomGenerator } from '../../test.utils';
 import {
   create,
   type PathLevelOfDetail,
@@ -13,23 +14,6 @@ import {
 } from './pathLevelOfDetailUtils';
 
 // Some helpers.
-
-const randomGenerator = (seed: number): (() => number) => {
-  // Return a deterministic pseudo-random number generator (Mulberry32), so that our tests are reproducible.
-
-  let state = seed;
-
-  return () => {
-    state = (state + 0x6d2b79f5) | 0;
-
-    let t = state;
-
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-};
 
 const NB_OF_LEVELS = 11;
 
@@ -71,10 +55,6 @@ const levelIndices = (
   const pathLevel = updatedLevel(lod, xValues, yValues, level);
 
   return pathLevel ? Array.from(pathLevel.indices.subarray(0, pathLevel.count)) : [];
-};
-
-const isFinitePoint = (xValues: Float64Array, yValues: Float64Array, index: number): boolean => {
-  return Number.isFinite(xValues[index]) && Number.isFinite(yValues[index]);
 };
 
 const checkLevels = (lod: PathLevelOfDetail, xValues: Float64Array, yValues: Float64Array, count: number): void => {

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 
+import { isFinitePoint, randomGenerator } from '../../test.utils';
 import {
   create,
   type LevelOfDetail,
@@ -13,23 +14,6 @@ import {
 } from './levelOfDetailUtils';
 
 // Some helpers.
-
-const randomGenerator = (seed: number): (() => number) => {
-  // Return a deterministic pseudo-random number generator (Mulberry32), so that our tests are reproducible.
-
-  let state = seed;
-
-  return () => {
-    state = (state + 0x6d2b79f5) | 0;
-
-    let t = state;
-
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-};
 
 const levelOfDetail = (xValues: Float64Array, yValues: Float64Array, count: number = xValues.length): LevelOfDetail => {
   // Return an up-to-date level of detail for the given points.
@@ -45,12 +29,6 @@ const selectedIndices = (selection: LevelOfDetailSelection | undefined): number[
   // Return the indices of the given selection.
 
   return selection ? Array.from(selection.indices.subarray(0, selection.nbOfPoints)) : [];
-};
-
-const isFinitePoint = (xValues: Float64Array, yValues: Float64Array, index: number): boolean => {
-  // Return whether the given point is finite, i.e. whether both its X and Y values are finite.
-
-  return Number.isFinite(xValues[index] as number) && Number.isFinite(yValues[index] as number);
 };
 
 const checkSelection = (
