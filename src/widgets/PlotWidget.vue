@@ -1191,7 +1191,7 @@ interface SvgPath extends Path {
 }
 
 interface SvgDocument {
-  svg: string;
+  svg: Blob;
   width: number;
   height: number;
 }
@@ -1474,16 +1474,14 @@ const svgDocument = (scale: number = 1): SvgDocument => {
       continue;
     }
 
-    const tracePath = svgPath();
+    const tracePath = chunkedPath(svgPath);
+    const traceAttributes = `stroke="${escapeXml(color)}" stroke-width="${svgNumber(traceLineWidth)}" stroke-linejoin="round" fill="none" clip-path="url(#traces)"`;
 
     linearPath(tracePath, xValues, yValues, 0, Math.min(xValues.length, yValues.length) - 1, area);
 
-    res.push(
-      svgPathElement(
-        tracePath,
-        `stroke="${escapeXml(color)}" stroke-width="${svgNumber(traceLineWidth)}" stroke-linejoin="round" fill="none" clip-path="url(#traces)"`
-      )
-    );
+    for (const path of tracePath.paths) {
+      res.push(svgPathElement(path, traceAttributes));
+    }
 
     if (hasMarkers(xValues, yValues)) {
       const markersPath = svgPath();
@@ -1519,9 +1517,11 @@ const svgDocument = (scale: number = 1): SvgDocument => {
   );
 
   // Return our SVG document and its size in scaled pixels.
+  // Note: our SVG document is a blob of its parts rather than one string, since it can be longer than a string can be
+  //       (e.g., about 536,000,000 characters in Chrome) if our traces have many points.
 
   return {
-    svg: res.join(''),
+    svg: new Blob(res, { type: 'image/svg+xml' }),
     width: scaledWidth,
     height: scaledHeight
   };
@@ -1532,7 +1532,7 @@ const rasterImage = async (format: RasterImageFormat): Promise<Blob> => {
   // which rasterises its SVG document at the size of its container).
 
   const { svg, width, height } = svgDocument(uPlot.pxRatio);
-  const url = URL.createObjectURL(new Blob([svg], { type: 'image/svg+xml' }));
+  const url = URL.createObjectURL(svg);
 
   try {
     // Load our SVG document as an image and wait for it to be decoded.
@@ -4154,6 +4154,90 @@ interface Path {
   arc: (x: number, y: number, radius: number, startAngle: number, endAngle: number) => void;
 }
 
+// Chrome (i.e. Skia) silently draws nothing for a path that has more than about 1,870,000 points (e.g., an unsorted
+// noisy trace of 10,000,000 points, which no level of detail can reduce), be it a Path2D or an SVG path element. So, if
+// a trace may have more than MAX_PATH_POINTS points, then we split it into several paths, which get drawn one after the
+// other (see chunkedPath()).
+// Note #1: a new path carries on from the last segment of the previous path (if any), so that the join between them is
+//          drawn as if they were one path.
+// Note #2: if a trace is faded (i.e. if another trace is highlighted), then the parts of it that are in different paths
+//          and that overlap get painted more than once, i.e. they look slightly less faded. This is only noticeable for
+//          a trace that has many more points than pixels (and that overlaps itself, e.g., noisy data), and it is still
+//          much better than drawing nothing.
+
+const MAX_PATH_POINTS = 1_000_000;
+
+interface ChunkedPath<T> extends Pick<Path, 'moveTo' | 'lineTo'> {
+  paths: T[];
+}
+
+const chunkedPath = <T extends Pick<Path, 'moveTo' | 'lineTo'>>(newPath: () => T): ChunkedPath<T> => {
+  // Return a path that adds its points to paths that it creates using the given function, so that none of them has
+  // more than MAX_PATH_POINTS points (see above).
+
+  let path = newPath();
+  const paths = [path];
+  let nbOfPoints = 0;
+  let nbOfPolylinePoints = 0;
+  let previousX = 0;
+  let previousY = 0;
+  let lastX = 0;
+  let lastY = 0;
+
+  const newPathIfNeeded = (): void => {
+    // Create a new path if our current one is full, carrying on from the last segment of our current polyline, if any
+    // (see Note #1 above).
+
+    if (nbOfPoints < MAX_PATH_POINTS) {
+      return;
+    }
+
+    path = newPath();
+    nbOfPoints = 0;
+
+    paths.push(path);
+
+    if (nbOfPolylinePoints > 1) {
+      path.moveTo(previousX, previousY);
+      path.lineTo(lastX, lastY);
+
+      nbOfPoints = 2;
+    } else if (nbOfPolylinePoints === 1) {
+      path.moveTo(lastX, lastY);
+
+      nbOfPoints = 1;
+    }
+  };
+
+  return {
+    paths,
+    moveTo: (x: number, y: number) => {
+      nbOfPolylinePoints = 0;
+
+      newPathIfNeeded();
+
+      path.moveTo(x, y);
+
+      ++nbOfPoints;
+      nbOfPolylinePoints = 1;
+      lastX = x;
+      lastY = y;
+    },
+    lineTo: (x: number, y: number) => {
+      newPathIfNeeded();
+
+      path.lineTo(x, y);
+
+      ++nbOfPoints;
+      ++nbOfPolylinePoints;
+      previousX = lastX;
+      previousY = lastY;
+      lastX = x;
+      lastY = y;
+    }
+  };
+};
+
 interface PathArea extends PlotRect {
   xMin: number;
   xMax: number;
@@ -4708,20 +4792,49 @@ const OUTLINE_MIN_TRAVEL = 4; // Vertical travel (in line widths) per pixel of w
 
 const isFirefox = typeof navigator !== 'undefined' && navigator.userAgent.includes('Firefox/');
 
+class SameStylePaths extends Map<string, Path2D> {
+  // Some paths that uPlot strokes one after the other, using the same style. Indeed, uPlot strokes each path of a map
+  // using its key as its style (see doStroke() in uPlot), i.e. a map would otherwise only allow one path per style.
+
+  private readonly style: string;
+  private readonly paths: Path2D[];
+
+  constructor(style: string, paths: Path2D[]) {
+    super();
+
+    this.style = style;
+    this.paths = paths;
+  }
+
+  override forEach(callback: (path: Path2D, style: string, map: Map<string, Path2D>) => void): void {
+    for (const path of this.paths) {
+      callback(path, this.style, this);
+    }
+  }
+}
+
 const linearPaths: uPlot.Series.PathBuilder = (u: uPlot, seriesIndex: number, index0: number, index1: number) => {
   // Use our linear path builder for our trace (see linearPath()), and our level of detail (see linearPathPoints()),
   // keeping track of the number of points that we go through. In Firefox, fill the outline of our trace rather than
-  // stroke it, if needed (see above).
+  // stroke it, if needed (see above). Also, split our path into several paths, if needed (see chunkedPath()).
+  // Note: linearPath() draws each of the points that it goes through at most once, so our path may only have more than
+  //       MAX_PATH_POINTS points if we go through more than that.
 
   const [xValues, yValues] = seriesData(u, seriesIndex) ?? [];
   const area = pathArea(u);
-  const stroke = new Path2D();
+  let strokes: Path2D[] = [];
   let outline: Path2D | null = null;
   let nbOfDrawnPoints = 0;
 
   if (xValues && yValues && area) {
     const points = linearPathPoints(seriesIndex, xValues, yValues, index0, index1, area);
     const lastIndex = Math.min(points.index1, points.xValues.length - 1, points.yValues.length - 1);
+
+    nbOfDrawnPoints = Math.max(0, lastIndex - points.index0 + 1);
+
+    const stroke = nbOfDrawnPoints > MAX_PATH_POINTS ? chunkedPath(() => new Path2D()) : new Path2D();
+
+    strokes = stroke instanceof Path2D ? [stroke] : stroke.paths;
 
     if (isFirefox) {
       const lineWidth = LINE_WIDTH * area.pxRatio;
@@ -4743,18 +4856,23 @@ const linearPaths: uPlot.Series.PathBuilder = (u: uPlot, seriesIndex: number, in
     } else {
       linearPath(stroke, points.xValues, points.yValues, points.index0, points.index1, area);
     }
-
-    nbOfDrawnPoints = Math.max(0, lastIndex - points.index0 + 1);
   }
 
   drawnPoints[seriesIndex - 1] = nbOfDrawnPoints;
 
   // Fill our outline, if we have one, using the colour of our trace, which uPlot uses rather than the fill style of our
-  // series (see drawPath() in uPlot). Otherwise, stroke our path.
+  // series (see drawPath() in uPlot). Otherwise, stroke our path or paths.
 
-  return outline
-    ? { stroke: null, fill: outline, _fill: seriesColor(seriesIndex), clip: null, flags: 0 }
-    : { stroke, fill: null, clip: null, flags: 0 };
+  if (outline) {
+    return { stroke: null, fill: outline, _fill: seriesColor(seriesIndex), clip: null, flags: 0 };
+  }
+
+  return {
+    stroke: strokes.length > 1 ? new SameStylePaths(seriesColor(seriesIndex), strokes) : (strokes[0] ?? null),
+    fill: null,
+    clip: null,
+    flags: 0
+  };
 };
 
 const markerPath = (path: Path, xValues: Float64Array, yValues: Float64Array, area: PathArea): void => {
