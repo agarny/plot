@@ -10,16 +10,16 @@
       "devDependencies": {
         "@biomejs/biome": "^2.6.8",
         "@happy-dom/global-registrator": "^21.0.4",
-        "@types/bun": "^1.4.4",
+        "@types/bun": "^1.4.5",
         "@vitejs/plugin-vue": "^6.0.11",
         "@vue/tsconfig": "^0.9.1",
         "puppeteer-core": "^25.18.1",
-        "stylelint": "^18.0.0",
-        "stylelint-config-standard": "^41.0.0",
+        "stylelint": "^18.1.0",
+        "stylelint-config-standard": "^41.1.0",
         "typescript": "^7.0.2",
         "typescript-6": "npm:typescript@^6.0.3",
         "vite": "^8.3.8",
-        "vue": "^3.5.45",
+        "vue": "^3.5.46",
         "vue-tsc": "^3.3.14",
       },
       "peerDependencies": {
@@ -375,6 +375,8 @@
     "yargs-parser": ["yargs-parser@22.0.0", "", {}, "sha512-rwu/ClNdSMpkSrUb+d6BRsSkLUq1fmfsY6TOpYzTwvwkg1/NRG85KBy3kq++A8LKQwX6lsu+aWad+2khvuXrqw=="],
 
     "zod": ["zod@4.6.7", "", {}, "sha512-g8W2D2kU6a8untc053fX1uVBKzM7yqAxW/3zwk83+6RyF2+SKOuV+c0wBDhUwzV1PaGapmZH+rmcUzPf+3CGwg=="],
+
+    "bun-types/undici-types": ["undici-types@8.13.1", "", {}, "sha512-wEtfquPVc1e9umZh73XVwnPauVuGQp20M/u/4ENuWMRkZ8NZx0ut6q3HLLdMUb9awNlxxHcsaGVhaerZu/2SSw=="],
 
     "cliui/string-width": ["string-width@7.2.0", "", { "dependencies": { "emoji-regex": "^10.3.0", "get-east-asian-width": "^1.0.0", "strip-ansi": "^7.1.0" } }, "sha512-tsaTIkKW9b4N+AEj+SVA+WhJzV7/zMhcSu78mLKWSk7cXMOSHsBKFWUs0fWwq8QyK3MgJBQRX6Gbi4kYbdvGkQ=="],
 
