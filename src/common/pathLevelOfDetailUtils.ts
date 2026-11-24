@@ -83,7 +83,7 @@ const STATE_SEGMENT = 2; // We have a segment in progress, from an anchor.
 export interface PathLevelState {
   state: number;
   anchor: number; // Index of our anchor.
-  anchorU: number; // Position of our anchor, relative to our origin and divided by our sizes.
+  anchorU: number; // Position of our anchor, relative to our origin and divided by our tolerances.
   anchorV: number;
   last: number; // Index of the end of our segment (i.e. of the last point that we processed), or of our anchor.
   maxSquaredDistance: number; // Max squared distance from our anchor (in tolerances) of our points beyond tolerance.
@@ -242,8 +242,8 @@ const rebuild = (lod: PathLevelOfDetail, xValues: Float64Array, yValues: Float64
   lod.ySize = size(lod.yMin, lod.yMax);
 
   // Don't have any levels if one of our sizes is not finite (i.e. the range of our values is bigger than 2^1023), since
-  // our values, once relative to our origin and divided by our sizes, would then be 0 or NaN, i.e. all of the points of
-  // our trace should be used.
+  // our values, once relative to our origin and divided by our tolerances, would then be 0 or NaN, i.e. all of the
+  // points of our trace should be used.
 
   if (lod.xSize === Number.POSITIVE_INFINITY || lod.ySize === Number.POSITIVE_INFINITY) {
     return;
@@ -396,9 +396,8 @@ const processLevel = (
   const count = lod.count;
   const xOrigin = lod.xOrigin;
   const yOrigin = lod.yOrigin;
-  const xSize = lod.xSize;
-  const ySize = lod.ySize;
-  const scale = 4 ** level.level;
+  const xScale = 4 ** level.level / lod.xSize; // Inverse of our X tolerance, which is exact since our sizes are powers
+  const yScale = 4 ** level.level / lod.ySize; // of two (see Note #1 above).
   const snapshot = level.snapshotState;
   let state = STATE_NONE;
   let anchor = -1;
@@ -434,8 +433,8 @@ const processLevel = (
     leftY = snapshot.leftY;
 
     if (state === STATE_SEGMENT) {
-      lastU = ((xValues[last] as number) - xOrigin) / xSize;
-      lastV = ((yValues[last] as number) - yOrigin) / ySize;
+      lastU = ((xValues[last] as number) - xOrigin) * xScale;
+      lastV = ((yValues[last] as number) - yOrigin) * yScale;
     }
 
     start = level.snapshotIndex;
@@ -444,8 +443,8 @@ const processLevel = (
 
     if (anchor !== -1) {
       state = STATE_SEGMENT;
-      anchorU = ((xValues[anchor] as number) - xOrigin) / xSize;
-      anchorV = ((yValues[anchor] as number) - yOrigin) / ySize;
+      anchorU = ((xValues[anchor] as number) - xOrigin) * xScale;
+      anchorV = ((yValues[anchor] as number) - yOrigin) * yScale;
       last = anchor;
       lastU = anchorU;
       lastV = anchorV;
@@ -495,8 +494,8 @@ const processLevel = (
       continue;
     }
 
-    const u = (x - xOrigin) / xSize;
-    const v = (y - yOrigin) / ySize;
+    const u = (x - xOrigin) * xScale;
+    const v = (y - yOrigin) * yScale;
 
     if (state !== STATE_SEGMENT) {
       // Our point is the first point of our trace or the first point after a gap, so it is our anchor.
@@ -521,8 +520,8 @@ const processLevel = (
     // anchor, at least as far from it as our previous points that are beyond our tolerance, and within our cone (i.e.
     // counterclockwise of its right boundary and clockwise of its left boundary).
 
-    let dx = (u - anchorU) * scale;
-    let dy = (v - anchorV) * scale;
+    let dx = u - anchorU;
+    let dy = v - anchorV;
     let squaredDistance = dx * dx + dy * dy;
 
     if (
@@ -546,8 +545,8 @@ const processLevel = (
       maxSquaredDistance = 0;
       fullCone = true;
 
-      dx = (u - anchorU) * scale;
-      dy = (v - anchorV) * scale;
+      dx = u - anchorU;
+      dy = v - anchorV;
       squaredDistance = dx * dx + dy * dy;
     }
 
