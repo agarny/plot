@@ -92,7 +92,7 @@ const checkLevels = (lod: PathLevelOfDetail, xValues: Float64Array, yValues: Flo
   for (const pathLevel of lod.levels) {
     const indices = levelIndices(lod, xValues, yValues, pathLevel.level);
     const kept = new Set(indices);
-    const scale = 2 ** pathLevel.level;
+    const scale = 4 ** pathLevel.level; // Our tolerances are our sizes divided by 4^level (see Note #1).
     const u = (index: number): number => (((xValues[index] as number) - lod.xOrigin) / lod.xSize) * scale;
     const v = (index: number): number => (((yValues[index] as number) - lod.yOrigin) / lod.ySize) * scale;
 
@@ -490,6 +490,97 @@ describe('update()', () => {
     expect((lod.levels.at(-1)?.count ?? 0) <= MAX_LEVEL_RATIO * nbOfPoints).toBe(true);
 
     checkLevels(lod, xValues, yValues, nbOfPoints);
+  });
+
+  it('stops updating a level as soon as it has too many points, and drops it', () => {
+    // Some noisy points along a line (see above), which we process in one go and incrementally, so that a level that we
+    // drop gets processed from scratch and from its snapshot (see Note #5 and Note #7 of pathLevelOfDetailUtils.ts).
+
+    const random = randomGenerator(987);
+    const nbOfPoints = MIN_NB_OF_POINTS_TO_DROP_LEVELS;
+    const xValues = Float64Array.from({ length: nbOfPoints }, (_value, i) => i / nbOfPoints);
+    const yValues = Float64Array.from({ length: nbOfPoints }, () => 0.001 * random());
+    const lod = create();
+
+    update(lod, xValues, yValues, nbOfPoints);
+
+    const levels = [...lod.levels];
+
+    updateLevels(lod, xValues, yValues);
+
+    const nbOfLevels = lod.levels.length;
+    const droppedLevel = levels[nbOfLevels];
+
+    expect(nbOfLevels).toBeGreaterThan(0);
+    expect(nbOfLevels).toBeLessThan(NB_OF_LEVELS);
+
+    // Our first dropped level stopped being updated as soon as it had too many points, and our finer levels were not
+    // updated at all.
+
+    expect(droppedLevel?.count).toBe(MAX_LEVEL_RATIO * nbOfPoints + 1);
+    expect(droppedLevel?.processedCount).toBe(0);
+    expect(levels.slice(nbOfLevels + 1).every((level) => level.processedCount === 0)).toBe(true);
+
+    // We drop the same levels if we process our points incrementally.
+
+    const incrementalLod = levelOfDetail(xValues, yValues, nbOfPoints - 1);
+
+    update(incrementalLod, xValues, yValues, nbOfPoints);
+    updateLevels(incrementalLod, xValues, yValues);
+
+    expect(incrementalLod.levels.length).toBe(nbOfLevels);
+
+    checkLevels(lod, xValues, yValues, nbOfPoints);
+  });
+
+  it('drops a level that has too many points because of gaps', () => {
+    // Some points that are every other one a gap, so that each of them is one of the points of our levels, but none of
+    // them is the end of a segment.
+
+    const nbOfPoints = MIN_NB_OF_POINTS_TO_DROP_LEVELS;
+    const xValues = Float64Array.from({ length: nbOfPoints }, (_value, i) => (i % 2 ? Number.NaN : i));
+    const yValues = Float64Array.from({ length: nbOfPoints }, (_value, i) => i);
+    const lod = create();
+
+    update(lod, xValues, yValues, nbOfPoints);
+
+    expect(lod.levels.length).toBe(NB_OF_LEVELS);
+    expect(updatedLevel(lod, xValues, yValues, 0)).toBeUndefined();
+    expect(lod.levels).toEqual([]);
+  });
+
+  it('has no levels if the range of its values is too big for its sizes to be finite', () => {
+    // A range of 10^308, i.e. more than 2^1023, so that our X size would be infinite and our X values would all be 0
+    // once relative to our origin and divided by our X size, i.e. our level 0 would only keep our first and last points
+    // (see Note #6 of pathLevelOfDetailUtils.ts).
+
+    const [xBuffer, yBuffer] = points([
+      [-5e307, 0],
+      [0, 1],
+      [5e307, 0],
+      [0, 1],
+      [-5e307, 0],
+      [1, 2]
+    ]);
+    const xValues = xBuffer.subarray(0, 5);
+    const yValues = yBuffer.subarray(0, 5);
+    const lod = levelOfDetail(xValues, yValues);
+
+    expect(lod.xSize).toBe(Number.POSITIVE_INFINITY);
+    expect(lod.levels).toEqual([]);
+    expect(memoryUsage(lod)).toBe(0);
+    expect(updatedLevel(lod, xValues, yValues, 0)).toBeUndefined();
+    expect(selectLevel(lod, xValues, yValues, 1, 1)).toBeUndefined();
+    expect(selectLevel(lod, xValues, yValues, Number.POSITIVE_INFINITY, 1)).toBeUndefined();
+
+    // Nothing changes when we get new points (since the range of our values cannot get any bigger).
+
+    update(lod, xBuffer, yBuffer, xBuffer.length);
+
+    expect(lod.count).toBe(xBuffer.length);
+    expect(lod.xSize).toBe(Number.POSITIVE_INFINITY);
+    expect(lod.levels).toEqual([]);
+    expect(selectLevel(lod, xBuffer, yBuffer, 1, 1)).toBeUndefined();
   });
 
   it('only updates a level when it is needed, catching up from where it was', () => {

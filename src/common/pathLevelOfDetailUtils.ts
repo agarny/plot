@@ -6,12 +6,12 @@
 //          YSize / 4^k along the Y axis, where XSize (and YSize) is the smallest power of two that is at least as big
 //          as the range of our X (and Y) values. (Our tolerances get four, rather than two, times smaller from one
 //          level to the next, so that we have half as many levels to build, at the cost of using a level that has up to
-//          four, rather than two, times smaller tolerances than needed, i.e. up to about two, rather than one and a
-//          half, times as many points as needed for a smooth trace.) For each level, consecutive points are replaced
-//          with a segment, from the first to the last of them, as long as all of them are within our tolerance of that
-//          segment, i.e. within a distance of one once their X and Y values are divided by our X and Y tolerances. So,
-//          if the tolerances of a level are smaller than a fraction of a pixel, then what gets drawn using that level
-//          is within that fraction of a pixel (times the square root of two, if both tolerances are that fraction of a
+//          four, rather than two, times smaller tolerances than needed, i.e. up to about two, rather than 1.4, times as
+//          many points as needed for a smooth trace.) For each level, consecutive points are replaced with a segment,
+//          from the first to the last of them, as long as all of them are within our tolerance of that segment, i.e.
+//          within a distance of one once their X and Y values are divided by our X and Y tolerances. So, if the
+//          tolerances of a level are no bigger than a fraction of a pixel, then what gets drawn using that level is
+//          within that fraction of a pixel (times the square root of two, if both tolerances are that fraction of a
 //          pixel) of what would otherwise get drawn, while the number of points to go through (and to draw) is about
 //          the number of segments that are needed to draw our trace within that fraction of a pixel, which is much
 //          smaller than its number of points for a smooth trace (e.g., about 1,000 rather than 1,000,000 for a
@@ -47,13 +47,17 @@
 // Note #6: our values are relative to an origin (i.e. the first finite point of our trace), so that they keep as much
 //          precision as possible (e.g., if they have a large offset). If the range of our values gets bigger than our
 //          sizes (e.g., while a simulation is running), then we rebuild our levels for all of our points, which only
-//          happens a few times since our sizes are powers of two (e.g., when the range of our values doubles).
+//          happens a few times since our sizes are powers of two (e.g., when the range of our values doubles). If the
+//          range of our values is so big that one of our sizes would not be finite (i.e. bigger than 2^1023), then we
+//          don't have any levels.
 // Note #7: a level that hardly reduces the number of points of a trace (e.g., a fine level for a trace with fewer
 //          points than segments to draw, or for noisy data) would only use memory, so once a trace has at least
 //          MIN_NB_OF_POINTS_TO_DROP_LEVELS points, we drop a level that has more than MAX_LEVEL_RATIO times its number
-//          of points when we update it, as well as our finer levels (since our levels have more and more points as they
-//          get finer). This means that our levels use, at most, about as much memory as the indices of the points of
-//          our trace. A dropped level only comes back if our levels get rebuilt (see Note #6).
+//          of points when we update it (as soon as it has that many points, so that we don't spend time updating a
+//          level that we are going to drop), as well as our finer levels (since our levels have more and more points
+//          as they get finer). Since a level typically has at least twice as many points as the previous one, this
+//          means that our levels typically have, at most, about as many points as our trace. A dropped level only
+//          comes back if our levels get rebuilt (see Note #6) or if we start again from scratch (see Note #8).
 // Note #8: like our (column) level of detail (see Note #8 of levelOfDetailUtils.ts), we keep track of the X and Y
 //          values that we were last updated with, so that when we get updated with some values that are not a
 //          continuation of them (see traceValues.ts), we start again from scratch, and otherwise only from our last
@@ -69,7 +73,8 @@ const MIN_SIZE = 2 ** -1000; // Minimum size (e.g., if all of our values are zer
 export const MIN_NB_OF_POINTS_TO_DROP_LEVELS = 16384;
 export const MAX_LEVEL_RATIO = 0.5;
 
-// The state of a level while it processes our points (see processLevel()).
+// The state of a level while it processes our points (see processLevel()), which it keeps as a snapshot (see Note #5
+// above).
 
 const STATE_NONE = 0; // We have nothing in progress, i.e. we are at the start of our trace or after a gap.
 const STATE_GAP = 1; // We are in a gap.
@@ -80,7 +85,7 @@ export interface PathLevelState {
   anchor: number; // Index of our anchor.
   anchorU: number; // Position of our anchor, relative to our origin and divided by our sizes.
   anchorV: number;
-  last: number; // Index of the last point that can be the end of our segment.
+  last: number; // Index of the end of our segment (i.e. of the last point that we processed), or of our anchor.
   maxSquaredDistance: number; // Max squared distance from our anchor (in tolerances) of our points beyond tolerance.
   fullCone: boolean; // Whether our cone allows all directions (i.e. no point constrains it yet).
   rightX: number; // Right (i.e. clockwise) boundary of our cone.
@@ -236,6 +241,14 @@ const rebuild = (lod: PathLevelOfDetail, xValues: Float64Array, yValues: Float64
   lod.xSize = size(lod.xMin, lod.xMax);
   lod.ySize = size(lod.yMin, lod.yMax);
 
+  // Don't have any levels if one of our sizes is not finite (i.e. the range of our values is bigger than 2^1023), since
+  // our values, once relative to our origin and divided by our sizes, would then be 0 or NaN, i.e. all of the points of
+  // our trace should be used.
+
+  if (lod.xSize === Number.POSITIVE_INFINITY || lod.ySize === Number.POSITIVE_INFINITY) {
+    return;
+  }
+
   for (let level = 0; level < NB_OF_LEVELS; ++level) {
     lod.levels.push({
       indices: new Int32Array(64),
@@ -304,16 +317,6 @@ const appendIndex = (level: PathLevel, index: number): void => {
   level.indices[level.count++] = index;
 };
 
-const startSegment = (state: PathLevelState, anchor: number, anchorU: number, anchorV: number): void => {
-  state.state = STATE_SEGMENT;
-  state.anchor = anchor;
-  state.anchorU = anchorU;
-  state.anchorV = anchorV;
-  state.last = anchor;
-  state.maxSquaredDistance = 0;
-  state.fullCone = true;
-};
-
 export const update = (lod: PathLevelOfDetail, xValues: Float64Array, yValues: Float64Array, count: number): void => {
   // Take the given points into account, from the first one that may have changed since we were last updated (see Note
   // #8 above), or that we haven't taken into account (see invalidate()), i.e. make sure that our sizes are big enough
@@ -377,8 +380,18 @@ export const update = (lod: PathLevelOfDetail, xValues: Float64Array, yValues: F
   lod.count = count;
 };
 
-const processLevel = (lod: PathLevelOfDetail, level: PathLevel, xValues: Float64Array, yValues: Float64Array): void => {
-  // Process the points of our trace that the given level hasn't processed (see Note #5 above).
+const processLevel = (
+  lod: PathLevelOfDetail,
+  level: PathLevel,
+  xValues: Float64Array,
+  yValues: Float64Array,
+  maxCount: number
+): boolean => {
+  // Process the points of our trace that the given level hasn't processed (see Note #5 above), and return whether the
+  // level has no more than the given number of points, stopping as soon as it has more (since it then gets dropped, see
+  // updatedLevel()).
+  // Note: our state (see PathLevelState for what it means) is kept in local variables rather than in a PathLevelState
+  //       object while we process our points, so that JavaScript engines can keep it in registers.
 
   const count = lod.count;
   const xOrigin = lod.xOrigin;
@@ -386,7 +399,20 @@ const processLevel = (lod: PathLevelOfDetail, level: PathLevel, xValues: Float64
   const xSize = lod.xSize;
   const ySize = lod.ySize;
   const scale = 4 ** level.level;
-  let state: PathLevelState;
+  const snapshot = level.snapshotState;
+  let state = STATE_NONE;
+  let anchor = -1;
+  let anchorU = 0;
+  let anchorV = 0;
+  let last = -1;
+  let lastU = 0; // Position of last (our next anchor if our segment ends), which our snapshot doesn't keep.
+  let lastV = 0;
+  let maxSquaredDistance = 0;
+  let fullCone = true;
+  let rightX = 0;
+  let rightY = 0;
+  let leftX = 0;
+  let leftY = 0;
   let start: number;
 
   // Reopen our level, i.e. restore its snapshot if we can, or remove its points that may change otherwise.
@@ -395,20 +421,34 @@ const processLevel = (lod: PathLevelOfDetail, level: PathLevel, xValues: Float64
     level.count = level.snapshotCount;
     level.openEnd = false;
 
-    state = { ...level.snapshotState };
+    state = snapshot.state;
+    anchor = snapshot.anchor;
+    anchorU = snapshot.anchorU;
+    anchorV = snapshot.anchorV;
+    last = snapshot.last;
+    maxSquaredDistance = snapshot.maxSquaredDistance;
+    fullCone = snapshot.fullCone;
+    rightX = snapshot.rightX;
+    rightY = snapshot.rightY;
+    leftX = snapshot.leftX;
+    leftY = snapshot.leftY;
+
+    if (state === STATE_SEGMENT) {
+      lastU = ((xValues[last] as number) - xOrigin) / xSize;
+      lastV = ((yValues[last] as number) - yOrigin) / ySize;
+    }
+
     start = level.snapshotIndex;
   } else {
-    const anchor = reopenLevel(level, xValues, yValues, level.processedCount);
-
-    state = newState();
+    anchor = reopenLevel(level, xValues, yValues, level.processedCount);
 
     if (anchor !== -1) {
-      startSegment(
-        state,
-        anchor,
-        ((xValues[anchor] as number) - xOrigin) / xSize,
-        ((yValues[anchor] as number) - yOrigin) / ySize
-      );
+      state = STATE_SEGMENT;
+      anchorU = ((xValues[anchor] as number) - xOrigin) / xSize;
+      anchorV = ((yValues[anchor] as number) - yOrigin) / ySize;
+      last = anchor;
+      lastU = anchorU;
+      lastV = anchorV;
     }
 
     start = anchor + 1;
@@ -421,8 +461,19 @@ const processLevel = (lod: PathLevelOfDetail, level: PathLevel, xValues: Float64
 
     if (i === count - 1) {
       level.snapshotIndex = i;
-      level.snapshotState = { ...state };
       level.snapshotCount = level.count;
+
+      snapshot.state = state;
+      snapshot.anchor = anchor;
+      snapshot.anchorU = anchorU;
+      snapshot.anchorV = anchorV;
+      snapshot.last = last;
+      snapshot.maxSquaredDistance = maxSquaredDistance;
+      snapshot.fullCone = fullCone;
+      snapshot.rightX = rightX;
+      snapshot.rightY = rightY;
+      snapshot.leftX = leftX;
+      snapshot.leftY = leftY;
     }
 
     const x = xValues[i] as number;
@@ -431,14 +482,14 @@ const processLevel = (lod: PathLevelOfDetail, level: PathLevel, xValues: Float64
     if (x - x !== 0 || y - y !== 0) {
       // A gap ends our segment, if any, and consecutive gaps are replaced with the first of them (see Note #4 above).
 
-      if (state.state === STATE_SEGMENT && state.last !== state.anchor) {
-        appendIndex(level, state.last);
+      if (state === STATE_SEGMENT && last !== anchor) {
+        appendIndex(level, last);
       }
 
-      if (state.state !== STATE_GAP) {
+      if (state !== STATE_GAP) {
         appendIndex(level, i);
 
-        state.state = STATE_GAP;
+        state = STATE_GAP;
       }
 
       continue;
@@ -447,50 +498,117 @@ const processLevel = (lod: PathLevelOfDetail, level: PathLevel, xValues: Float64
     const u = (x - xOrigin) / xSize;
     const v = (y - yOrigin) / ySize;
 
-    if (state.state !== STATE_SEGMENT) {
+    if (state !== STATE_SEGMENT) {
       // Our point is the first point of our trace or the first point after a gap, so it is our anchor.
 
       appendIndex(level, i);
-      startSegment(state, i, u, v);
+
+      state = STATE_SEGMENT;
+      anchor = i;
+      anchorU = u;
+      anchorV = v;
+      last = i;
+      lastU = u;
+      lastV = v;
+      maxSquaredDistance = 0;
+      fullCone = true;
 
       continue;
     }
 
-    // Check whether our point can be the end of our segment (see Note #2 and Note #3 above).
+    // Check whether our point can be the end of our segment (see Note #2 and Note #3 above), i.e. whether it is within
+    // our tolerance of our anchor and so are our previous points, or whether it is further than our tolerance from our
+    // anchor, at least as far from it as our previous points that are beyond our tolerance, and within our cone (i.e.
+    // counterclockwise of its right boundary and clockwise of its left boundary).
 
-    let dx = (u - state.anchorU) * scale;
-    let dy = (v - state.anchorV) * scale;
+    let dx = (u - anchorU) * scale;
+    let dy = (v - anchorV) * scale;
     let squaredDistance = dx * dx + dy * dy;
 
-    if (!isSegmentEnd(state, dx, dy, squaredDistance)) {
+    if (
+      squaredDistance <= 1
+        ? maxSquaredDistance !== 0
+        : squaredDistance < maxSquaredDistance ||
+          (!fullCone && (rightX * dy - rightY * dx < 0 || dx * leftY - dy * leftX < 0))
+    ) {
       // Our previous point becomes the end of our segment and the anchor of our next segment, which our point is then
       // always the end of (since our cone allows all directions and nothing is further than our point).
 
-      appendIndex(level, state.last);
-      startSegment(
-        state,
-        state.last,
-        ((xValues[state.last] as number) - xOrigin) / xSize,
-        ((yValues[state.last] as number) - yOrigin) / ySize
-      );
+      appendIndex(level, last);
 
-      dx = (u - state.anchorU) * scale;
-      dy = (v - state.anchorV) * scale;
+      if (level.count > maxCount) {
+        return false;
+      }
+
+      anchor = last;
+      anchorU = lastU;
+      anchorV = lastV;
+      maxSquaredDistance = 0;
+      fullCone = true;
+
+      dx = (u - anchorU) * scale;
+      dy = (v - anchorV) * scale;
       squaredDistance = dx * dx + dy * dy;
     }
 
-    extendSegment(state, i, dx, dy, squaredDistance);
+    // Make our point the end of our segment, and narrow our cone so that it keeps our point within our tolerance of our
+    // segment, if our point is further than our tolerance from our anchor (see Note #3 above).
+
+    last = i;
+    lastU = u;
+    lastV = v;
+
+    if (squaredDistance > 1) {
+      maxSquaredDistance = squaredDistance;
+
+      // The boundaries of the directions that keep our point within our tolerance, i.e. the direction of our point
+      // rotated by -asin(1 / distance) and asin(1 / distance), which we don't normalise since we only use them in cross
+      // products (i.e. to know which side of a direction another direction is on). So, they are distance^2 long, i.e.
+      // (dx * cos + dy * sin, dy * cos - dx * sin) * distance for our right boundary, with
+      // cos = sqrt(distance^2 - 1) / distance and sin = 1 / distance.
+
+      const scaledCos = Math.sqrt(squaredDistance - 1);
+      const newRightX = dx * scaledCos + dy;
+      const newRightY = dy * scaledCos - dx;
+      const newLeftX = dx * scaledCos - dy;
+      const newLeftY = dy * scaledCos + dx;
+
+      if (fullCone) {
+        fullCone = false;
+
+        rightX = newRightX;
+        rightY = newRightY;
+        leftX = newLeftX;
+        leftY = newLeftY;
+      } else {
+        // Our cone is the intersection of our previous cone and of those directions, i.e. the most counterclockwise of
+        // their right boundaries and the most clockwise of their left boundaries (since both of them contain the
+        // direction of our point and are less than half a turn wide).
+
+        if (rightX * newRightY - rightY * newRightX > 0) {
+          rightX = newRightX;
+          rightY = newRightY;
+        }
+
+        if (newLeftX * leftY - newLeftY * leftX > 0) {
+          leftX = newLeftX;
+          leftY = newLeftY;
+        }
+      }
+    }
   }
 
   // Add the end of our segment, if any, as an open end (since it may still be extended, see reopenLevel()).
 
-  if (state.state === STATE_SEGMENT && state.last !== state.anchor) {
-    appendIndex(level, state.last);
+  if (state === STATE_SEGMENT && last !== anchor) {
+    appendIndex(level, last);
 
     level.openEnd = true;
   }
 
   level.processedCount = count;
+
+  return level.count <= maxCount;
 };
 
 export const updatedLevel = (
@@ -508,85 +626,25 @@ export const updatedLevel = (
     return undefined;
   }
 
-  if (level.processedCount < lod.count) {
-    processLevel(lod, level, xValues, yValues);
+  // Update our level, if needed, and drop it, as well as our finer levels, if it hardly reduces the number of points of
+  // our trace (see Note #7 above).
 
-    // Drop our level, and our finer levels, if it hardly reduces the number of points of our trace (see Note #7 above).
+  if (
+    level.processedCount < lod.count &&
+    !processLevel(
+      lod,
+      level,
+      xValues,
+      yValues,
+      lod.count >= MIN_NB_OF_POINTS_TO_DROP_LEVELS ? MAX_LEVEL_RATIO * lod.count : Number.POSITIVE_INFINITY
+    )
+  ) {
+    lod.levels.length = levelNumber;
 
-    if (lod.count >= MIN_NB_OF_POINTS_TO_DROP_LEVELS && level.count > MAX_LEVEL_RATIO * lod.count) {
-      lod.levels.length = levelNumber;
-
-      return undefined;
-    }
+    return undefined;
   }
 
   return level;
-};
-
-const isSegmentEnd = (state: PathLevelState, dx: number, dy: number, squaredDistance: number): boolean => {
-  // Return whether the point at the given position (relative to our anchor, in tolerances) can be the end of our
-  // segment (see Note #2 above).
-
-  if (squaredDistance <= 1) {
-    // Our point is within our tolerance of our anchor, so it can only be the end of our segment if our previous points
-    // are within our tolerance of our anchor too.
-
-    return state.maxSquaredDistance === 0;
-  }
-
-  return (
-    squaredDistance >= state.maxSquaredDistance &&
-    (state.fullCone || (state.rightX * dy - state.rightY * dx >= 0 && dx * state.leftY - dy * state.leftX >= 0))
-  );
-};
-
-const extendSegment = (state: PathLevelState, index: number, dx: number, dy: number, squaredDistance: number): void => {
-  // Make the point at the given position (relative to our anchor, in tolerances) the end of our segment, and narrow
-  // our cone so that it keeps our point within our tolerance of our segment (see Note #3 above).
-
-  state.last = index;
-
-  if (squaredDistance <= 1) {
-    return;
-  }
-
-  state.maxSquaredDistance = squaredDistance;
-
-  // The boundaries of the directions that keep our point within our tolerance, i.e. the direction of our point rotated
-  // by -asin(1 / distance) and asin(1 / distance), which we don't normalise since we only use them in cross products
-  // (i.e. to know which side of a direction another direction is on), hence they are distance^2 times longer than
-  // their direction, i.e. (dx * cos + dy * sin, dy * cos - dx * sin) * distance^2 for our right boundary, with
-  // cos = sqrt(distance^2 - 1) / distance and sin = 1 / distance.
-
-  const scaledCos = Math.sqrt(squaredDistance - 1);
-  const rightX = dx * scaledCos + dy;
-  const rightY = dy * scaledCos - dx;
-  const leftX = dx * scaledCos - dy;
-  const leftY = dy * scaledCos + dx;
-
-  if (state.fullCone) {
-    state.fullCone = false;
-    state.rightX = rightX;
-    state.rightY = rightY;
-    state.leftX = leftX;
-    state.leftY = leftY;
-
-    return;
-  }
-
-  // Our cone is the intersection of our previous cone and of those directions, i.e. the most counterclockwise of their
-  // right boundaries and the most clockwise of their left boundaries (since both of them contain the direction of our
-  // point and are less than half a turn wide).
-
-  if (state.rightX * rightY - state.rightY * rightX > 0) {
-    state.rightX = rightX;
-    state.rightY = rightY;
-  }
-
-  if (leftX * state.leftY - leftY * state.leftX > 0) {
-    state.leftX = leftX;
-    state.leftY = leftY;
-  }
 };
 
 export const selectLevel = (
@@ -596,7 +654,7 @@ export const selectLevel = (
   maxXTolerance: number,
   maxYTolerance: number
 ): PathLevel | undefined => {
-  // Return our coarsest level which tolerances are no bigger than the given ones, once up to date (see updatedLevel()),
+  // Return our coarsest level whose tolerances are no bigger than the given ones, once up to date (see updatedLevel()),
   // if any (otherwise, all of the points of our trace should be used).
   // Note: our level of detail must have taken all of the points of our trace into account (see update()).
 
