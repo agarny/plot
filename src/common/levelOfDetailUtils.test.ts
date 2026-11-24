@@ -44,10 +44,10 @@ const checkSelection = (
   // Check that the given selection is what we need to draw the given points for the given X range split into the given
   // number of columns, i.e. that, for each range of points (see selectPoints()), all of its points are selected if it
   // has up to four of them. Otherwise, for each run of finite points of that range, its first and last points, as well
-  // as points with its minimum and maximum Y values, and no more than four points in total, are selected (with the
-  // first point of a run that starts our selection or that follows a gap being selected on its own, and the rest of
-  // the run being selected that way), and for each gap of that range (i.e. points with a non-finite X or Y value), its
-  // first point is selected.
+  // as its first points with its minimum and maximum Y values (see Note #9 of levelOfDetailUtils.ts), and no more than
+  // four points in total, are selected (with the first point of a run that starts our selection or that follows a gap
+  // being selected on its own, and the rest of the run being selected that way), and for each gap of that range (i.e.
+  // points with a non-finite X or Y value), its first point is selected.
   // Note: we determine our ranges of points and their runs in a brute-force way, i.e. without relying on
   //       levelOfDetailUtils.ts.
 
@@ -125,13 +125,12 @@ const checkSelection = (
           }
 
           const runYValues = Array.from(yValues.subarray(checkedRunStart, runEnd));
-          const selectedYValues = runIndices.map((i) => yValues[i] as number);
 
           expect(runIndices.length).toBeLessThanOrEqual(4);
           expect(runIndices[0]).toBe(checkedRunStart);
           expect(runIndices.at(-1)).toBe(runEnd - 1);
-          expect(Math.min(...selectedYValues)).toBe(Math.min(...runYValues));
-          expect(Math.max(...selectedYValues)).toBe(Math.max(...runYValues));
+          expect(runIndices).toContain(checkedRunStart + runYValues.indexOf(Math.min(...runYValues)));
+          expect(runIndices).toContain(checkedRunStart + runYValues.indexOf(Math.max(...runYValues)));
         } else {
           expect(runIndices).toEqual([runStart]);
         }
@@ -651,6 +650,56 @@ describe('selectPoints()', () => {
     }
   });
 
+  it('selects the first points with the minimum and maximum Y values of a range, like linearPath()', () => {
+    // Our minimum and maximum Y values are first reached within a block of points, and then again after the last block
+    // that is fully within our range, so the points within that block must be selected (see Note #9 of
+    // levelOfDetailUtils.ts).
+    // Note: our X range is after all of our points, so they are all in the same range. However, our first point starts
+    //       our selection, so it gets selected on its own (see Note #5 of levelOfDetailUtils.ts).
+
+    const xValues = Float64Array.from({ length: 100 }, (_value, i) => i);
+    const yValues = new Float64Array(100);
+
+    yValues[40] = 9;
+    yValues[60] = -9;
+    yValues[70] = 9;
+    yValues[97] = -9;
+    yValues[98] = 9;
+
+    expect(
+      selectedIndices(selectPoints(levelOfDetail(xValues, yValues), xValues, yValues, 0, 100, 100, 200, 1))
+    ).toEqual([0, 1, 40, 60, 99]);
+  });
+
+  it('selects the first points with the minimum and maximum Y values of a range, for some quantised points', () => {
+    // Our Y values are quantised (to five values), so most of our ranges reach their minimum and maximum Y values
+    // several times, including within different levels of blocks.
+
+    const random = randomGenerator(654);
+
+    for (const gaps of [false, true]) {
+      const nbOfPoints = 70000;
+      const [xValues, yValues] = randomPoints(random, nbOfPoints, gaps);
+
+      for (let i = 0; i < nbOfPoints; ++i) {
+        yValues[i] = Math.round((yValues[i] as number) / 250);
+      }
+
+      const lod = levelOfDetail(xValues, yValues);
+      const xLast = xValues.reduce((max, x) => (Number.isFinite(x) ? Math.max(max, x) : max), 0);
+
+      for (let run = 0; run < 20; ++run) {
+        const xMin = xLast * (1.2 * random() - 0.1);
+        const xMax = xMin + xLast * (0.01 + random());
+        const nbOfColumns = 1 + Math.floor(300 * random());
+        const [start, end] = visibleRange(lod, xValues, yValues, nbOfPoints, xMin, xMax);
+        const selection = selectPoints(lod, xValues, yValues, start, end, xMin, xMax, nbOfColumns);
+
+        checkSelection(xValues, yValues, start, end, xMin, xMax, nbOfColumns, selection);
+      }
+    }
+  });
+
   it('selects all the points of a range that has up to four of them', () => {
     const xValues = Float64Array.from([0, 1, 2, 3]);
     const yValues = Float64Array.from([3, 1, 4, 1]);
@@ -912,5 +961,51 @@ describe('selectPoints()', () => {
       );
       checkSelection(xValues, yValues, 0, 12, 0, 1, nbOfColumns, selection);
     }
+  });
+
+  it('only reuses its previous selection up to the end of its current range of points', () => {
+    const xValues = Float64Array.from({ length: 100 }, (_value, i) => i);
+    const yValues = Float64Array.from({ length: 100 }, (_value, i) => Math.sin(i));
+    const lod = levelOfDetail(xValues, yValues);
+
+    selectPoints(lod, xValues, yValues, 0, 100, 0, 99, 10);
+
+    // Our range of points ends within a column, i.e. the selection of that column must not be reused.
+
+    const selection = selectPoints(lod, xValues, yValues, 0, 45, 0, 99, 10);
+
+    expect(selection.firstChanged).toBeGreaterThan(0);
+    expect(selectedIndices(selection)).toEqual(
+      selectedIndices(selectPoints(levelOfDetail(xValues, yValues), xValues, yValues, 0, 45, 0, 99, 10))
+    );
+    checkSelection(xValues, yValues, 0, 45, 0, 99, 10, selection);
+  });
+
+  it('has room for all the points that it may select, if they have no gap', () => {
+    // Each of our ranges of points (i.e. before our X range, within each of our columns, and after our X range) has ten
+    // points, four of which get selected, and the first point of our selection gets selected on its own (see Note #5
+    // of levelOfDetailUtils.ts), so our selection doesn't need to grow.
+
+    const nbOfColumns = 10;
+    const nbOfPoints = 10 * (nbOfColumns + 2);
+    const xValues = Float64Array.from({ length: nbOfPoints }, (_value, i) => i);
+    const yValues = Float64Array.from(
+      { length: nbOfPoints },
+      (_value, i) => [0, 1, 5, 2, 3, -5, 4, 1, 2, 3][i % 10] as number
+    );
+    const selection = selectPoints(
+      levelOfDetail(xValues, yValues),
+      xValues,
+      yValues,
+      0,
+      nbOfPoints,
+      10,
+      10 * (nbOfColumns + 1),
+      nbOfColumns
+    );
+
+    expect(selection.nbOfPoints).toBe(4 * (nbOfColumns + 2) + 1);
+    expect(selection.indices.length).toBe(selection.nbOfPoints);
+    checkSelection(xValues, yValues, 0, nbOfPoints, 10, 10 * (nbOfColumns + 1), nbOfColumns, selection);
   });
 });

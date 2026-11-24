@@ -28,10 +28,12 @@
 //          first, minimum, maximum, and last points of the rest of the run, so that what gets drawn is exactly the same
 //          as if all of its points were drawn.
 // Note #6: we keep track of the points that we last selected, and of the first point that may have changed since then.
-//          So, if a trace gets drawn for the same X range and number of columns as before (e.g., while a simulation is
-//          running, with a fixed X range), then we only select the points of the columns from the one that contains
-//          the first point that may have changed, i.e. selecting our points again once a few more points have been
-//          added costs O(number of new points) rather than O(number of columns).
+//          So, if a trace gets drawn for the same X range, number of columns, and first point as before (e.g., while
+//          a simulation is running, with a fixed X range), then we only select the points of the columns from the one
+//          that contains the last finite point before the first point that may have changed. Also, we stop looking at
+//          our columns once we have no finite point left (since our remaining columns then have no point). This means
+//          that selecting our points again once a few more points have been added costs O(number of new points) rather
+//          than O(number of columns).
 // Note #7: a gap may have a non-finite X value (e.g., a logarithmic X axis and a non-positive X value), or a finite X
 //          value that is anywhere (since it doesn't get drawn), so only the X values of our finite points need to be
 //          sorted. This means that, when looking for the first point that is in a given column, we look at the first
@@ -44,6 +46,10 @@
 //          This matters since we may be shared (e.g., by the path and the hover of a plot, see PlotWidget.vue), i.e. we
 //          may have been last updated by another of our users, and with other values (e.g., if the traces of a plot
 //          have changed in the meantime), so a user cannot rely on the values that it last updated us with.
+// Note #9: for each pixel column, linearPath() draws the first of its points with the minimum (and maximum) Y value,
+//          should several of its points have that Y value (e.g., with quantised data). So, we do the same, i.e. our
+//          blocks and our queries go through their points in order, so that we select the very points that linearPath()
+//          would draw.
 
 import { isContinuationOf } from './traceValues';
 
@@ -439,47 +445,69 @@ const queryBlocks = (level: Level, yValues: Float64Array, start: number, end: nu
   queryResult[QUERY_HAS_GAP] = hasGap;
 };
 
+// The points/blocks that query() processes last, for each level that it goes through (i.e. a start and an end per
+// level, starting with our points), which is enough for up to 31 levels of blocks (i.e. many more than we can have).
+// Note: they are indices, so we keep them as integers, so that our query functions iterate over them as such, which is
+//       faster (e.g., querying three noisy traces of 1,000,000 points is about 8% slower with a Float64Array in V8).
+
+const queryEnds = new Int32Array(64);
+
 const query = (lod: LevelOfDetail, xValues: Float64Array, yValues: Float64Array, start: number, end: number): void => {
   // Query the given range of points, i.e. from the given start (included) to the given end (excluded), going through
-  // the raw points and then the blocks (of the different levels) that cover our range.
+  // the raw points and then the blocks (of the different levels) that cover our range, in order (see Note #9 above),
+  // i.e. those that cover the beginning of our range, from our raw points to our biggest blocks, and then those that
+  // cover the end of our range, from our biggest blocks to our raw points.
+  // Note: we don't use a helper function to process the points/blocks of a level since Chrome wouldn't inline it, which
+  //       would make querying slower (e.g., about 3% slower for three noisy traces of 1,000,000 points).
 
   resetQueryResult();
 
+  const topLevelIndex = lod.levels.length - 1;
+  let levelIndex = -1;
   let low = start;
   let high = end;
 
-  for (let levelIndex = -1; low < high; ++levelIndex) {
-    const level = levelIndex >= 0 ? (lod.levels[levelIndex] as Level) : undefined;
+  // Process our points/blocks up to the first block (of the next level) that is fully within our range, keep track of
+  // those from the last block (of the next level) that is fully within our range, and move on to the next level.
 
-    // If there is no next level, then process our remaining points/blocks directly.
-
-    if (!lod.levels[levelIndex + 1]) {
-      if (level) {
-        queryBlocks(level, yValues, low, high);
-      } else {
-        queryPoints(xValues, yValues, low, high);
-      }
-
-      break;
-    }
-
-    // Process our points/blocks up to the first block (of the next level) that is fully within our range, and from the
-    // last one that is fully within our range, and move on to the next level.
-
+  for (; levelIndex < topLevelIndex && low < high; ++levelIndex) {
     const alignedLow = Math.min(high, Math.ceil(low / BLOCK_SIZE) * BLOCK_SIZE);
     const alignedHigh = Math.max(alignedLow, Math.floor(high / BLOCK_SIZE) * BLOCK_SIZE);
 
-    if (level) {
-      queryBlocks(level, yValues, low, alignedLow);
-      queryBlocks(level, yValues, alignedHigh, high);
+    if (levelIndex >= 0) {
+      queryBlocks(lod.levels[levelIndex] as Level, yValues, low, alignedLow);
     } else {
       queryPoints(xValues, yValues, low, alignedLow);
-      queryPoints(xValues, yValues, alignedHigh, high);
     }
+
+    queryEnds[2 * levelIndex + 2] = alignedHigh;
+    queryEnds[2 * levelIndex + 3] = high;
 
     low = alignedLow / BLOCK_SIZE;
     high = alignedHigh / BLOCK_SIZE;
   }
+
+  // Process our remaining points/blocks (of the level that we have reached), and then those that we kept track of, if
+  // any (i.e. if we have moved on to another level).
+
+  if (levelIndex < 0) {
+    queryPoints(xValues, yValues, low, high);
+
+    return;
+  }
+
+  queryBlocks(lod.levels[levelIndex] as Level, yValues, low, high);
+
+  while (--levelIndex >= 0) {
+    queryBlocks(
+      lod.levels[levelIndex] as Level,
+      yValues,
+      queryEnds[2 * levelIndex + 2] as number,
+      queryEnds[2 * levelIndex + 3] as number
+    );
+  }
+
+  queryPoints(xValues, yValues, queryEnds[0] as number, queryEnds[1] as number);
 };
 
 const lowerBound = (
@@ -492,7 +520,7 @@ const lowerBound = (
 ): number => {
   // Return the index of the first of the given points, between the given start and end, from which the first finite
   // point (if any) has an X value that is not less than the given value (or the given end if there is none), see Note
-  // #8 above.
+  // #7 above.
   // Note: if there is no finite point from our middle point to our high point, then our middle point is like our high
   //       point.
 
@@ -611,9 +639,10 @@ export const neighbouringPoints = (
 
 const maxNbOfSelectedPoints = (nbOfColumns: number): number => {
   // Return the maximum number of points that selectPoints() may select for the given number of columns, if our points
-  // have no gap (see Note #4 above).
+  // have no gap (see Note #4 above), i.e. four points for each of our ranges of points (see selectPoints()), as well as
+  // the first point of our selection, which gets selected on its own (see Note #5 above).
 
-  return 4 * (nbOfColumns + 2);
+  return 4 * (nbOfColumns + 2) + 1;
 };
 
 const selectionIndices = (selection: LevelOfDetailSelection, nbOfPoints: number, nbOfNewPoints: number): Int32Array => {
@@ -861,10 +890,10 @@ export const selectPoints = (
   let nbOfPoints = 0;
 
   // Check whether we can reuse (some of) our previous selection (see Note #6 above), i.e. resume from the range that
-  // contains the last finite point up to the first point that may have changed (or the last point that we previously
-  // had).
+  // contains the last finite point before the first point that may have changed (or the end of our previous or current
+  // range of points, whichever comes first).
   // Note: the ranges before that range only depend on the points up to that finite point (see lowerBound()), so they
-  //       cannot have changed.
+  //       cannot have changed, as long as that finite point is within both our previous and current ranges of points.
 
   if (
     selection &&
@@ -873,7 +902,12 @@ export const selectPoints = (
     selection.nbOfColumns === nbOfColumns &&
     selection.start === start
   ) {
-    const finitePoint = previousFinitePoint(lod, xValues, yValues, Math.min(selection.validCount, selection.end) - 1);
+    const finitePoint = previousFinitePoint(
+      lod,
+      xValues,
+      yValues,
+      Math.min(selection.validCount, selection.end, end) - 1
+    );
 
     if (finitePoint >= start) {
       // Determine the last boundary that is not greater than the X value of our finite point, if any.
@@ -935,7 +969,8 @@ export const selectPoints = (
     nbOfPoints = 0;
   }
 
-  // Select our points from our range start.
+  // Select our points from our range start, i.e. for each of our columns, and then for our last range (which has all
+  // of our remaining points, if any, once we have no finite point left, see Note #6 above).
   // Note: we keep track of the first finite point from our range start, so that we don't have to look for it again for
   //       each of our ranges that is empty (e.g., for each column within a long gap, which we would otherwise have to
   //       skip again, see lowerBound()).
@@ -944,25 +979,26 @@ export const selectPoints = (
 
   let nextFinitePoint = -1;
 
-  for (; iteration <= nbOfColumns + 1; ++iteration) {
-    let rangeEnd = end;
+  for (; iteration <= nbOfColumns; ++iteration) {
+    if (nextFinitePoint < rangeStart) {
+      nextFinitePoint = skipBlocks(lod, xValues, yValues, rangeStart, end, false);
 
-    if (iteration <= nbOfColumns) {
-      const value = iteration === nbOfColumns ? xMax : xMin + iteration * columnWidth;
-
-      if (nextFinitePoint < rangeStart) {
-        nextFinitePoint = skipBlocks(lod, xValues, yValues, rangeStart, end, false);
+      if (nextFinitePoint === end) {
+        break;
       }
-
-      rangeEnd =
-        nextFinitePoint === end || (xValues[nextFinitePoint] as number) >= value
-          ? rangeStart
-          : gallopingLowerBound(lod, xValues, yValues, nextFinitePoint + 1, end, value);
     }
 
-    nbOfPoints = selectRangePoints(lod, xValues, yValues, rangeStart, rangeEnd, selection, nbOfPoints);
-    rangeStart = rangeEnd;
+    const value = iteration === nbOfColumns ? xMax : xMin + iteration * columnWidth;
+
+    if ((xValues[nextFinitePoint] as number) < value) {
+      const rangeEnd = gallopingLowerBound(lod, xValues, yValues, nextFinitePoint + 1, end, value);
+
+      nbOfPoints = selectRangePoints(lod, xValues, yValues, rangeStart, rangeEnd, selection, nbOfPoints);
+      rangeStart = rangeEnd;
+    }
   }
+
+  nbOfPoints = selectRangePoints(lod, xValues, yValues, rangeStart, end, selection, nbOfPoints);
 
   selection.nbOfPoints = nbOfPoints;
   selection.xMin = xMin;
