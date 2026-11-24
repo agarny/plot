@@ -10,9 +10,8 @@
 // Note #2: to find the points with the minimum and maximum Y values of a range of points quickly, we keep, for each
 //          block of BLOCK_SIZE points, the index of its finite point with the minimum (and maximum) Y value, and
 //          whether it has a gap (i.e. a point with a non-finite X or Y value). We then do the same for each block of
-//          BLOCK_SIZE blocks, and so on.
-//          This means that finding those points costs O(BLOCK_SIZE * log(number of points)) rather than O(number of
-//          points).
+//          BLOCK_SIZE blocks, and so on. This means that finding those points costs O(BLOCK_SIZE * log(number of
+//          points)) rather than O(number of points).
 // Note #3: like the rest of our data processing (see traceValues.ts), our blocks are kept up to date incrementally,
 //          i.e. if only the last point onwards of a trace may have changed, then we only update the blocks that cover
 //          those points.
@@ -28,8 +27,8 @@
 //          first, minimum, maximum, and last points of the rest of the run, so that what gets drawn is exactly the same
 //          as if all of its points were drawn.
 // Note #6: we keep track of the points that we last selected, and of the first point that may have changed since then.
-//          So, if a trace gets drawn for the same X range, number of columns, and first point as before (e.g., while
-//          a simulation is running, with a fixed X range), then we only select the points of the columns from the one
+//          So, if a trace gets drawn for the same X range, number of columns, and first point as before (e.g., while a
+//          simulation is running, with a fixed X range), then we only select the points of the columns from the one
 //          that contains the last finite point before the first point that may have changed. Also, we stop looking at
 //          our columns once we have no finite point left (since our remaining columns then have no point). This means
 //          that selecting our points again once a few more points have been added costs O(number of new points) rather
@@ -342,8 +341,8 @@ export const update = (lod: LevelOfDetail, xValues: Float64Array, yValues: Float
 
 // The result of a query (see query()), i.e. the index of the finite point with the minimum (and maximum) Y value of a
 // range of points (or -1 if there is none), their Y value, and whether that range has a gap.
-// Note: our query functions only use local variables (and update this result once per call), so that they are fast
-//       (see update()).
+// Note: our query functions only use local variables (and update this result once per call), so that they are fast (see
+//       update()).
 
 const QUERY_MIN_INDEX = 0;
 const QUERY_MAX_INDEX = 1;
@@ -875,9 +874,9 @@ export const selectPoints = (
   // the given number of columns (see Note #1 and Note #4 above).
   // Note: our level of detail must be up to date (see update()).
 
-  // Our points are selected range by range, i.e. iteration k selects the points of [b(k - 1), b(k)), where b(-1) is
-  // our start, b(k) is the first point from which the first finite point has an X value that is not less than
-  // boundary(k) (for 0 <= k <= nbOfColumns, see lowerBound()), and b(nbOfColumns + 1) is our end.
+  // Our points are selected range by range, i.e. iteration k selects the points of [b(k - 1), b(k)), where b(-1) is our
+  // start, b(k) is the first point from which the first finite point has an X value that is not less than boundary(k)
+  // (for 0 <= k <= nbOfColumns, see lowerBound()), and b(nbOfColumns + 1) is our end.
 
   const columnWidth = (xMax - xMin) / nbOfColumns;
   const boundary = (k: number): number => (k === nbOfColumns ? xMax : xMin + k * columnWidth);
@@ -969,8 +968,8 @@ export const selectPoints = (
     nbOfPoints = 0;
   }
 
-  // Select our points from our range start, i.e. for each of our columns, and then for our last range (which has all
-  // of our remaining points, if any, once we have no finite point left, see Note #6 above).
+  // Select our points from our range start, i.e. for each of our columns, and then for our last range (which has all of
+  // our remaining points, if any, once we have no finite point left, see Note #6 above).
   // Note: we keep track of the first finite point from our range start, so that we don't have to look for it again for
   //       each of our ranges that is empty (e.g., for each column within a long gap, which we would otherwise have to
   //       skip again, see lowerBound()).

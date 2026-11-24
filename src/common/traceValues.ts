@@ -1,10 +1,10 @@
 // Incremental processing of the values of our traces (see PlotWidget.vue).
-// Note: our data may get updated often (e.g., many times a second while a simulation is running), and typically
-//       with a few more values each time. So, rather than process all of our values every time, we check whether they
-//       are a continuation of the values we processed before (i.e. a view of the same buffer, from the same offset, and
-//       at least as long), in which case we assume that only their last value onwards may have changed (e.g., live data
-//       that gets appended to, with its last value retrieved again). This means that processing N new values costs
-//       O(N) rather than O(number of values).
+// Note: our data may get updated often (e.g., many times a second while a simulation is running), and typically with a
+//       few more values each time. So, rather than process all of our values every time, we check whether they are a
+//       continuation of the values we processed before (i.e. a view of the same buffer, from the same offset, and at
+//       least as long), in which case we assume that only their last value onwards may have changed (e.g., live data
+//       that gets appended to, with its last value retrieved again). This means that processing N new values costs O(N)
+//       rather than O(number of values).
 
 export const isContinuationOf = (values: Float64Array, previousValues: Float64Array | undefined): boolean => {
   return (
@@ -110,10 +110,10 @@ export const valuesStatistics = (values: Float64Array, previous?: ValuesStatisti
 
 // The base-10 logarithm of some values, i.e. what we plot along a logarithmic axis.
 // Note #1: we keep the logarithm of some values in a buffer. If some values are a continuation of the previous ones,
-//          then we only convert their last value onwards, in the same buffer, and we return a view of that buffer.
-//          This means that the logarithm of some values is itself a continuation of the logarithm of their previous
-//          values, so that their statistics (see valuesStatistics()) and our levels of detail only need to process
-//          their new values too.
+//          then we only convert their last value onwards, in the same buffer, and we return a view of that buffer. This
+//          means that the logarithm of some values is itself a continuation of the logarithm of their previous values,
+//          so that their statistics (see valuesStatistics()) and our levels of detail only need to process their new
+//          values too.
 // Note #2: we create a new buffer whenever some values are not a continuation of the previous ones, so that we never
 //          present new values as a continuation of old ones. Also, a new buffer has room for twice as many values as we
 //          have (but no more than what is left of the buffer of our values, e.g. live data, which buffer has room for

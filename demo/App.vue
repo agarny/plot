@@ -506,8 +506,8 @@ const naturalMargins: (PlotMargins | undefined)[] = []; // Natural margins of ou
 const margins = vue.shallowRef<PlotMargins | undefined>(); // Shared margins of our instances.
 
 const onMarginsUpdated = (newMargins: PlotMargins, index: number): void => {
-  // Keep track of the natural margins of the given instance and update our shared margins, if needed (i.e. only if
-  // they have changed, so that our instances don't get relaid out for nothing).
+  // Keep track of the natural margins of the given instance and update our shared margins, if needed (i.e. only if they
+  // have changed, so that our instances don't get relaid out for nothing).
 
   naturalMargins[index] = newMargins;
 
@@ -605,8 +605,8 @@ vue.onBeforeUnmount(() => {
 //    up being empty);
 //  - live: we plot our data as if it was being generated (see Live updating above), from no points to all of them in
 //    BENCHMARK_LIVE_FRAMES frames, over and over, with a fixed X range (like a simulation that is plotted for its whole
-//    duration). This means that every frame, our instances get a few more points (i.e. a continuation of their
-//    previous ones, see traceValues.ts), which they need to process and draw; and
+//    duration). This means that every frame, our instances get a few more points (i.e. a continuation of their previous
+//    ones, see traceValues.ts), which they need to process and draw; and
 //  - resize: we shrink our instances (i.e. our grid of instances) to BENCHMARK_MIN_RESIZE_SCALE of their width and
 //    height, and then grow them back, in BENCHMARK_RESIZE_FRAMES frames, over and over (like when resizing a window).
 //    This means that every frame, our instances get laid out and drawn again.
@@ -614,23 +614,22 @@ vue.onBeforeUnmount(() => {
 //          it takes our instances to redraw themselves is what tells us how much headroom we have (our benchmark
 //          script, however, may run our benchmark in a browser whose frame rate is not capped, see
 //          scripts/benchmark.ts).
-// Note #2: our instances redraw themselves in their requestAnimationFrame() callbacks, which they request when they
-//          get zoomed, panned, or updated (or when they get resized, once the browser has laid out our frame). So,
-//          every frame, we zoom, pan, or update them from a requestAnimationFrame() callback (onFrameEnd()) that we
-//          request after that (so that it gets called after theirs in the next frame) and that is preceded by another
-//          one (onFrameStart()) that we request before that (so that it gets called before theirs in the next frame).
-//          The redraw time of our instances is then the time between the start of onFrameStart() and the end of the
-//          frame, i.e. once the browser has rendered it, which is when the message that onFrameEnd() posts gets
-//          handled. This includes everything that happens during the frame: our instances redrawing themselves,
-//          processing their new data (which they do once onFrameEnd() has returned), and the browser rendering the
-//          frame.
+// Note #2: our instances redraw themselves in their requestAnimationFrame() callbacks, which they request when they get
+//          zoomed, panned, or updated (or when they get resized, once the browser has laid out our frame). So, every
+//          frame, we zoom, pan, or update them from a requestAnimationFrame() callback (onFrameEnd()) that we request
+//          after that (so that it gets called after theirs in the next frame) and that is preceded by another one
+//          (onFrameStart()) that we request before that (so that it gets called before theirs in the next frame). The
+//          redraw time of our instances is then the time between the start of onFrameStart() and the end of the frame,
+//          i.e. once the browser has rendered it, which is when the message that onFrameEnd() posts gets handled. This
+//          includes everything that happens during the frame: our instances redrawing themselves, processing their new
+//          data (which they do once onFrameEnd() has returned), and the browser rendering the frame.
 // Note #3: we zoom our instances by sending wheel events to them (i.e. to the element of uPlot that handles them, or to
 //          their X axis dragger to only zoom along their X axis), we pan them by sending them arrow key presses (i.e.
 //          to their plotting area), and we reset their zoom between interactions by sending them a "0" key press.
-// Note #4: an arrow key press pans an axis by 10% of its length (see KEYBOARD_PAN_FRACTION in PlotWidget.vue), so
-//          with a zoom of Z, our instances get from the middle of their data to one of its ends in 5 * (Z - 1) frames,
-//          and from one end to the other in 10 * (Z - 1) frames. Without any zoom, they get panned by half of their X
-//          range in 5 frames.
+// Note #4: an arrow key press pans an axis by 10% of its length (see KEYBOARD_PAN_FRACTION in PlotWidget.vue), so with
+//          a zoom of Z, our instances get from the middle of their data to one of its ends in 5 * (Z - 1) frames, and
+//          from one end to the other in 10 * (Z - 1) frames. Without any zoom, they get panned by half of their X range
+//          in 5 frames.
 
 const BENCHMARK_DURATION = 5000; // Duration (in milliseconds) of each of our interactions.
 const BENCHMARK_MAX_ZOOM = 100; // Maximum zoom of our zoom interaction.
@@ -720,8 +719,8 @@ const runInteraction = (interact: (frame: number) => void): Promise<BenchmarkRes
     let frame = 0;
 
     frameEndChannel.port1.onmessage = (): void => {
-      // Keep track of how long our frame took (but not for our first frame, since our instances haven't had anything
-      // to redraw yet).
+      // Keep track of how long our frame took (but not for our first frame, since our instances haven't had anything to
+      // redraw yet).
 
       if (nbOfFrames > 1) {
         redrawDurations.push(performance.now() - frameStartTime);
@@ -891,8 +890,8 @@ const runBenchmark = async (): Promise<void> => {
   // Plot our data live, with a fixed X range, stopping our own live updating, if any, while we do so, and then showing
   // our data as it was before (i.e. all at once or live).
   // Note: when showing all of our data again, we don't measure our time to first draw (i.e. we don't use showData()),
-  //       since our instances already exist and only get the rest of their data (i.e. a continuation of their data,
-  //       see traceValues.ts), i.e. our time to first draw would otherwise be much shorter than it really is.
+  //       since our instances already exist and only get the rest of their data (i.e. a continuation of their data, see
+  //       traceValues.ts), i.e. our time to first draw would otherwise be much shorter than it really is.
 
   benchmarkInteraction.value = 'live';
 

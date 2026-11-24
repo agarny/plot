@@ -3,8 +3,8 @@
     <div ref="containerRef" class="opencor-plot-theme opencor-context-menu" :class="{ 'opencor-plot-dark-mode': darkMode }" :style="themeStyle">
       <!--
       Note: our menu and its open submenu, if any, are our levels, which are shown next to one another (rather than
-            nested), each of them being a list that can get the keyboard focus (see onKeyDown()), with its focused
-            item being its active descendant.
+            nested), each of them being a list that can get the keyboard focus (see onKeyDown()), with its focused item
+            being its active descendant.
       -->
       <ul v-for="(level, levelIndex) in levels" :key="levelIndex"
         :ref="(element) => setLevelElement(levelIndex, element)"
@@ -56,8 +56,8 @@ import IconWidget from './IconWidget.vue';
 //  - is shown where it is requested, while remaining within the viewport, and so are its submenus;
 //  - can be used with the mouse (hovering an item focuses it and opens its submenu, if any) and with the keyboard
 //    (ArrowUp/ArrowDown/Home/End to focus an item, ArrowRight/Enter/Space to open the submenu of the focused item,
-//    ArrowLeft to close a submenu, Enter/Space to select the focused item, typing the first letters of an item to
-//    focus it, and Escape/Tab to hide our context menu); and
+//    ArrowLeft to close a submenu, Enter/Space to select the focused item, typing the first letters of an item to focus
+//    it, and Escape/Tab to hide our context menu); and
 //  - gets hidden when an item is selected, when the user clicks outside of it, or when the window gets resized.
 // Note #1: an item with a (boolean) checked property is a checkable item (e.g., to make an axis logarithmic), in which
 //          case it has a check mark to the left of its icon when it is checked, and it is described as such to

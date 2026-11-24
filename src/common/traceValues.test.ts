@@ -131,8 +131,8 @@ describe('valuesStatistics()', () => {
 
   it('gives the same results incrementally as from scratch', () => {
     // Simulate some live data, i.e. a buffer that gets appended to (by a random number of values at a time) and which
-    // last value gets retrieved again (and may therefore change), and check that, at each step, our statistics are
-    // the same as those of the same values processed from scratch.
+    // last value gets retrieved again (and may therefore change), and check that, at each step, our statistics are the
+    // same as those of the same values processed from scratch.
 
     const random = randomGenerator(123);
     const SPECIAL_VALUES = [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY];

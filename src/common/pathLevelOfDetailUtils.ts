@@ -54,10 +54,10 @@
 //          points than segments to draw, or for noisy data) would only use memory, so once a trace has at least
 //          MIN_NB_OF_POINTS_TO_DROP_LEVELS points, we drop a level that has more than MAX_LEVEL_RATIO times its number
 //          of points when we update it (as soon as it has that many points, so that we don't spend time updating a
-//          level that we are going to drop), as well as our finer levels (since our levels have more and more points
-//          as they get finer). Since a level typically has at least twice as many points as the previous one, this
-//          means that our levels typically have, at most, about as many points as our trace. A dropped level only
-//          comes back if our levels get rebuilt (see Note #6) or if we start again from scratch (see Note #8).
+//          level that we are going to drop), as well as our finer levels (since our levels have more and more points as
+//          they get finer). Since a level typically has at least twice as many points as the previous one, this means
+//          that our levels typically have, at most, about as many points as our trace. A dropped level only comes back
+//          if our levels get rebuilt (see Note #6) or if we start again from scratch (see Note #8).
 // Note #8: like our (column) level of detail (see Note #8 of levelOfDetailUtils.ts), we keep track of the X and Y
 //          values that we were last updated with, so that when we get updated with some values that are not a
 //          continuation of them (see traceValues.ts), we start again from scratch, and otherwise only from our last

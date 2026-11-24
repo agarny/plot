@@ -42,8 +42,8 @@ const isVersionPinned = (version: string): boolean => {
   return /^\d/.test(version);
 };
 
-// Parse a dependency into its components: package name, version range, and alias (i.e. the name of the dependency if
-// it is an alias for another package, e.g., ("typescript-6", "npm:typescript@^6.0.3") -> { packageName: "typescript",
+// Parse a dependency into its components: package name, version range, and alias (i.e. the name of the dependency if it
+// is an alias for another package, e.g., ("typescript-6", "npm:typescript@^6.0.3") -> { packageName: "typescript",
 // range: "^6.0.3", alias: "typescript-6" }).
 
 const parseDependency = (name: string, version: string): Dependency => {

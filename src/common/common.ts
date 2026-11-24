@@ -135,8 +135,8 @@ export const sleep = (ms: number): Promise<void> => {
 //          next animation frame.
 // Note #3: no animation frames are run while our document is hidden (e.g., when our window is minimised), in which case
 //          there is nothing to paint for people to see, so we don't wait (or stop waiting) for our UI to be painted.
-//          Otherwise, we would wait until our document is visible again (e.g., a simulation run would only finish
-//          once our window is restored).
+//          Otherwise, we would wait until our document is visible again (e.g., a simulation run would only finish once
+//          our window is restored).
 
 const waitForNextAnimationFrameUnlessHidden = (): Promise<void> => {
   return new Promise((resolve) => {
@@ -224,8 +224,8 @@ export const cancelFrame = (id: number): void => {
   calledFrameCallbacks?.delete(id);
 };
 
-// A method to observe the size of an element, i.e. to call a callback whenever the size of the element changes, and
-// to return a method to stop observing it.
+// A method to observe the size of an element, i.e. to call a callback whenever the size of the element changes, and to
+// return a method to stop observing it.
 // Note: we use a ResizeObserver that is shared by all the elements that we observe (e.g., those of all of our plots),
 //       rather than one per element. Indeed, a browser calls the callback of each ResizeObserver in turn, running
 //       microtasks in between. So, with one ResizeObserver per plot, the changes that a plot makes in a microtask

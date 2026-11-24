@@ -31,8 +31,8 @@ export const createChunkedPath = <T extends ChunkablePath>(
   newPath: () => T,
   maxNbOfPoints: number = MAX_PATH_POINTS
 ): ChunkedPath<T> => {
-  // Return a path that adds its points to paths that it creates using the given function, so that none of them has
-  // more than the given number of points (or MIN_MAX_NB_OF_POINTS points, if bigger, see Note #1 above).
+  // Return a path that adds its points to paths that it creates using the given function, so that none of them has more
+  // than the given number of points (or MIN_MAX_NB_OF_POINTS points, if bigger, see Note #1 above).
 
   const maxPoints = Math.max(MIN_MAX_NB_OF_POINTS, maxNbOfPoints);
   let path = newPath();

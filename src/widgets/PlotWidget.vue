@@ -809,9 +809,9 @@ const updatePlotRect = (u: uPlot): void => {
 // The position and width of our legend.
 // Note: our legend is at most LEGEND_MAX_WIDTH_RATIO times as wide as our container (with the names of our traces
 //       truncated if needed, see onLegendPointerEnter()), so that it doesn't take most of the width of a narrow plot
-//       (e.g., with many instances side by side, or with long trace names), and it is hidden altogether if it can't
-//       be at least LEGEND_MIN_WIDTH wide. Until we know the width of our container (i.e. until we have been laid
-//       out), our legend is neither limited nor hidden, so that it doesn't make our plot get laid out again.
+//       (e.g., with many instances side by side, or with long trace names), and it is hidden altogether if it can't be
+//       at least LEGEND_MIN_WIDTH wide. Until we know the width of our container (i.e. until we have been laid out),
+//       our legend is neither limited nor hidden, so that it doesn't make our plot get laid out again.
 
 const containerWidth = vue.ref<number>(0);
 
@@ -1181,8 +1181,8 @@ const onContextMenuHide = (): void => {
 // Copy and export, like Plotly, i.e. an image of our plot and of our legend (but not of what we show when hovering or
 // zooming, i.e. our hover tooltip, guide line, and highlighted points, and our zoom box).
 // Note: we build an SVG document from what we currently show, which we either export as is or rasterise. For our axis
-//       titles and legend, we use where the browser renders their text, so that any HTML they contain (e.g.,
-//       subscripts and superscripts) gets rendered as it is in our panel.
+//       titles and legend, we use where the browser renders their text, so that any HTML they contain (e.g., subscripts
+//       and superscripts) gets rendered as it is in our panel.
 
 type ImageFormat = 'jpeg' | 'png' | 'svg' | 'webp';
 type RasterImageFormat = Exclude<ImageFormat, 'svg'>;
@@ -1286,8 +1286,8 @@ const svgHtmlText = (element: HTMLElement | null, origin: DOMRect, vertical: boo
       continue;
     }
 
-    // Determine the decorations of our text, which, unlike its other styles, are not inherited, so we must also look
-    // at the ancestors of our text node.
+    // Determine the decorations of our text, which, unlike its other styles, are not inherited, so we must also look at
+    // the ancestors of our text node.
 
     const style = getComputedStyle(parent);
     const decorations = new Set<string>();
@@ -1678,10 +1678,10 @@ const exportToCsv = async (): Promise<void> => {
 
     // Perform the export itself.
     // Note: to efficiently export to CSV, we build an array of CSV lines, which we join together for each chunk of rows
-    //       (see below), rather than concatenate strings together repeatedly. Each chunk is then turned into a blob
-    //       and our CSV file is a blob of those blobs. Indeed, our CSV file may be much bigger than the maximum length
-    //       of a string (e.g., about 800 MB for three traces with 10 million points, while the maximum length of a
-    //       string is about 512 MB in Chrome), and a blob may be kept outside of the JavaScript heap.
+    //       (see below), rather than concatenate strings together repeatedly. Each chunk is then turned into a blob and
+    //       our CSV file is a blob of those blobs. Indeed, our CSV file may be much bigger than the maximum length of a
+    //       string (e.g., about 800 MB for three traces with 10 million points, while the maximum length of a string is
+    //       about 512 MB in Chrome), and a blob may be kept outside of the JavaScript heap.
 
     const csvType = 'text/csv;charset=utf-8;';
     const csvChunks: Blob[] = [];
@@ -1748,8 +1748,8 @@ const exportToCsv = async (): Promise<void> => {
 
     csvLines.push(headerParts.join(','));
 
-    // Data rows, of which there are as many as the number of values of our longest X column, with empty cells for the
-    // X columns (and their Y columns) that have fewer values.
+    // Data rows, of which there are as many as the number of values of our longest X column, with empty cells for the X
+    // columns (and their Y columns) that have fewer values.
     // Note: we let people know about our progress and keep the UI responsive every CSV_EXPORT_YIELD_INTERVAL
     //       milliseconds, rather than after a given number of rows. Indeed, a browser makes us wait at least 4 ms when
     //       we yield to it many times in a row, so yielding after every chunk of rows (i.e. 100 times) would make an
@@ -1927,8 +1927,8 @@ const autoRange = (u: uPlot, axisKey: AxisKey, min: number, max: number): Range 
     }
   }
 
-  // Determine the range that fits all of our extrema, falling back to a tight range if there is not enough room for
-  // our padding (e.g., if our axis is really short).
+  // Determine the range that fits all of our extrema, falling back to a tight range if there is not enough room for our
+  // padding (e.g., if our axis is really short).
 
   let res: Range = [min, max];
   let maxValuePerPixel = 0;
@@ -2833,8 +2833,8 @@ const onDragMove = (event: PointerEvent): void => {
 
 const onDragEnd = (event: PointerEvent): void => {
   // Make sure that we are dragging.
-  // Note: this should always be the case since we only listen to pointerup events while dragging (see onDragStart()
-  //       and stopDrag()).
+  // Note: this should always be the case since we only listen to pointerup events while dragging (see onDragStart() and
+  //       stopDrag()).
 
   const currentDrag = drag;
 
@@ -3246,9 +3246,9 @@ const openRangeEditor = (type: AxisEnd): void => {
   // pressed anywhere else.
   // Note #1: we listen to pointer presses (in the capture phase) rather than rely on our range editor losing focus
   //          since some of our pointer presses don't move the focus (see onPressMouseDown()).
-  // Note #2: we listen to pointer presses rather than mouse presses since our range editor may have been opened using
-  //          a tap, in which case a mouse press gets emulated once our range editor has been opened (see Note #3 of
-  //          the pointer interaction section above), which would otherwise close it straight away.
+  // Note #2: we listen to pointer presses rather than mouse presses since our range editor may have been opened using a
+  //          tap, in which case a mouse press gets emulated once our range editor has been opened (see Note #3 of the
+  //          pointer interaction section above), which would otherwise close it straight away.
 
   void vue.nextTick().then(() => {
     const element = rangeEditorRef.value;
@@ -3485,9 +3485,9 @@ const plotLabel = vue.computed<string>(() => {
 });
 
 const panBy = (axisKey: AxisKey, direction: 1 | -1): void => {
-  // Pan the given axis in the given direction by a fraction of its length, from the range that it will have once we
-  // are done animating it (so that panning several times in a row, e.g., by keeping an arrow key pressed, is not
-  // affected by our animation, see zoomBy()).
+  // Pan the given axis in the given direction by a fraction of its length, from the range that it will have once we are
+  // done animating it (so that panning several times in a row, e.g., by keeping an arrow key pressed, is not affected
+  // by our animation, see zoomBy()).
 
   const range = targetRange(axisKey);
 
@@ -3601,8 +3601,8 @@ const MAX_NB_OF_SI_DECIMALS = 3; // Maximum number of decimals that a number wit
 const numberFormat = (dtick: number, maxEnd: number): NumberFormat => {
   // Determine the format of our tick labels from our tick spacing and from the end of our axis that is the furthest
   // away from zero.
-  // Note: unlike Plotly, we don't use an SI prefix if our number would then need more than a few decimals, which is
-  //       the case when our tick spacing is small compared to our values (e.g., "1,000,000,000.2" rather than
+  // Note: unlike Plotly, we don't use an SI prefix if our number would then need more than a few decimals, which is the
+  //       case when our tick spacing is small compared to our values (e.g., "1,000,000,000.2" rather than
   //       "1.0000000002B" when zoomed in on timestamps). We still use an exponent beyond our SI prefixes, though, since
   //       our numbers would otherwise be too long.
 
@@ -4038,10 +4038,10 @@ const rightMargin = (): number => {
   // Our right margin must leave room for our legend (or, if we are given some shared margins, for the shared right
   // margin) and for half our last X tick label (since it is centred on its tick), with a margin on its right side.
   // Note #1: our legend is to the right of our plotting area and no taller than it while our last X tick label is below
-  //          our plotting area, so they can't overlap and our right margin only needs to fit the wider of the two.
-  //          In practice, our last X tick label only matters when we don't have a legend (e.g., in the standard view
-  //          or if we have no traces) since our legend is otherwise always wider than half our last X tick label.
-  //          Also, unlike our legend, our last X tick label is not part of our shared right margin (see
+  //          our plotting area, so they can't overlap and our right margin only needs to fit the wider of the two. In
+  //          practice, our last X tick label only matters when we don't have a legend (e.g., in the standard view or if
+  //          we have no traces) since our legend is otherwise always wider than half our last X tick label. Also,
+  //          unlike our legend, our last X tick label is not part of our shared right margin (see
   //          updateMarginsAsync()).
   // Note #2: uPlot computes our tick labels (see axisValues()) before our padding, so our last X tick label is up to
   //          date.
@@ -4299,8 +4299,8 @@ const linearPath = (
 
   const drawColumn = (): void => {
     // Draw the minimum and maximum points of our current column (in their original order) unless they are its first
-    // point (which we have already drawn) or its last point (which we draw last), and skipping any point that is at
-    // the same position as the point drawn before it (since it would result in a zero-length segment).
+    // point (which we have already drawn) or its last point (which we draw last), and skipping any point that is at the
+    // same position as the point drawn before it (since it would result in a zero-length segment).
 
     // If we don't have a first point, then we don't have a column to draw.
 
@@ -4380,9 +4380,8 @@ const linearPath = (
     const pointOutCode =
       (xPos < outLeft ? 1 : xPos > outRight ? 2 : 0) | (yPos < outTop ? 4 : yPos > outBottom ? 8 : 0);
 
-    // Make sure that we have a previous point and that the segment between it and our current point may be visible.
-    // If not, then we break our path and keep track of our current point, which may be the start of a visible
-    // segment.
+    // Make sure that we have a previous point and that the segment between it and our current point may be visible. If
+    // not, then we break our path and keep track of our current point, which may be the start of a visible segment.
 
     if (!(penDown || hasPendingPoint) || (previousOutCode & pointOutCode) !== 0) {
       if (penDown) {
@@ -4472,8 +4471,8 @@ const linearPath = (
 //          own (and therefore more memory). It keeps track of the values that it was last updated with (see Note #8 of
 //          levelOfDetailUtils.ts), so each of its users only needs to update it with the values that it uses (see
 //          updatedTraceLod()).
-// Note #5: if the X values of our trace are not sorted (e.g., a phase plot), then linearPath() has to go through all
-//          of its points. So, we first select the points that keep our trace within PATH_LOD_TOLERANCE canvas pixels of
+// Note #5: if the X values of our trace are not sorted (e.g., a phase plot), then linearPath() has to go through all of
+//          its points. So, we first select the points that keep our trace within PATH_LOD_TOLERANCE canvas pixels of
 //          what it would otherwise look like (along each axis) using our path level of detail (see
 //          pathLevelOfDetailUtils.ts), and only give them to linearPath(). For a smooth trace, this means a few
 //          thousand rather than millions of points, but not for a noisy trace (which our path level of detail can't
@@ -4485,15 +4484,15 @@ const linearPath = (
 //          look like (see simplifiedPathUtils.ts), since stroking a path costs about the same for each of its segments.
 // Note #7: selecting the points of a trace which X values are sorted using our level of detail (see Note #1) costs
 //          O(number of pixel columns), which is much more than what our path level of detail costs for a smooth trace
-//          (e.g., about 0.2 ms rather than 0.01 ms per trace in Chrome). So, if our trace was smooth the last time
-//          that we simplified its path (i.e. if its simplified path had at most SMOOTH_TRACE_RATIO times the number of
+//          (e.g., about 0.2 ms rather than 0.01 ms per trace in Chrome). So, if our trace was smooth the last time that
+//          we simplified its path (i.e. if its simplified path had at most SMOOTH_TRACE_RATIO times the number of
 //          points that it would otherwise have had, see Note #6 and simplifiedPathUtils.ts), then we only go through
 //          the points of our path level of detail that cover our visible points, if it has a level for our tolerance.
 //          We don't do this for a trace that is not smooth (e.g., noisy data), since our path level of detail would
 //          cost O(number of points) to find out that it can't reduce it (and again whenever its levels get rebuilt,
 //          e.g., while a simulation is running). Neither do we do this for a trace whose points have changed since we
-//          last built its path (other than its last point, see traceValues.ts), i.e. that has new points (e.g., while
-//          a simulation is running) or new values (e.g., when plotting new data with the same number of points), since
+//          last built its path (other than its last point, see traceValues.ts), i.e. that has new points (e.g., while a
+//          simulation is running) or new values (e.g., when plotting new data with the same number of points), since
 //          our path level of detail would then have to process them (and be rebuilt for new values, or whenever the
 //          range of its values gets bigger), while our (column) level of detail only selects the points of the columns
 //          that they are in (see Note #6 of levelOfDetailUtils.ts).
@@ -4540,8 +4539,8 @@ const updatedTraceLod = (
   yValues: Float64Array,
   count: number
 ): levelOfDetailUtils.LevelOfDetail => {
-  // Return the level of detail of the given trace (creating it if needed), once updated for the given points (see
-  // Note #4 above).
+  // Return the level of detail of the given trace (creating it if needed), once updated for the given points (see Note
+  // #4 above).
 
   traceLods[traceIndex] ??= levelOfDetailUtils.create();
 
@@ -5085,8 +5084,8 @@ const hoveredIndex = (
   const lod = updatedTraceLod(traceIndex, xValues, yValues, nbOfPoints);
 
   if (lod.sortedLength === nbOfPoints) {
-    // Look at the finite points on either side of the X value that is under the mouse pointer, skipping any gap
-    // between them and that X value (using our level of detail, so that it costs O(log(number of points))).
+    // Look at the finite points on either side of the X value that is under the mouse pointer, skipping any gap between
+    // them and that X value (using our level of detail, so that it costs O(log(number of points))).
 
     for (const i of levelOfDetailUtils.neighbouringPoints(lod, xValues, yValues, nbOfPoints, xMin + left / xFactor)) {
       if (i < 0 || i >= nbOfPoints) {
@@ -5419,8 +5418,8 @@ const plotValues = (
     return processedValues;
   }
 
-  // Carry on from what we did the last time our data got updated for the longest values of which the given values are
-  // a continuation, if any and if no other values have already done so, or start from scratch (see Note #2 above).
+  // Carry on from what we did the last time our data got updated for the longest values of which the given values are a
+  // continuation, if any and if no other values have already done so, or start from scratch (see Note #2 above).
 
   let res: PlottedAxisValues | undefined;
 
@@ -5572,9 +5571,9 @@ const createPlot = (width: number, height: number): void => {
           setScale: false,
           // Note: uPlot stops the propagation of a click on our plotting area if it thinks that it ends a drag, which
           //       it determines using the position of the last mouse press that it handled. However, we handle mouse
-          //       presses ourselves, so uPlot would think that most clicks end a drag and stop their propagation
-          //       (e.g., preventing our context menu from being hidden when clicking on our plotting area), hence we
-          //       let them propagate.
+          //       presses ourselves, so uPlot would think that most clicks end a drag and stop their propagation (e.g.,
+          //       preventing our context menu from being hidden when clicking on our plotting area), hence we let them
+          //       propagate.
           click: () => {}
         },
         bind: {
@@ -5628,9 +5627,9 @@ const createPlot = (width: number, height: number): void => {
             updateLivePoints(u);
             updateMarginsAsync();
 
-            // Update our hover tooltip if we have one or if the mouse pointer is over our plotting area, since our
-            // plot may have changed (e.g., our data got updated or we zoomed in/out), i.e. our tooltip may have to
-            // change, disappear, or appear (e.g., when a live trace reaches the mouse pointer).
+            // Update our hover tooltip if we have one or if the mouse pointer is over our plotting area, since our plot
+            // may have changed (e.g., our data got updated or we zoomed in/out), i.e. our tooltip may have to change,
+            // disappear, or appear (e.g., when a live trace reaches the mouse pointer).
 
             if (hover.value || (u.cursor.left ?? -1) >= 0) {
               queueHoverUpdate();

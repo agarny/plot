@@ -233,10 +233,10 @@ const launchPuppeteerBrowser = async (name: 'chrome' | 'firefox', userDataDir: s
 
 const puppeteerBrowser = async (name: 'chrome' | 'firefox', url: string): Promise<BenchmarkBrowser> => {
   // Launch Chrome or Firefox using Puppeteer and open our demo in it.
-  // Note: we launch our browser with a profile directory of our own, so that we can clean up after it, even if it
-  //       fails to launch (e.g., Firefox may restart itself when it gets launched, typically after having been
-  //       updated, in which case Puppeteer loses track of it and reports a failure, but the restarted Firefox keeps
-  //       running). If our browser fails to launch, then we try once more.
+  // Note: we launch our browser with a profile directory of our own, so that we can clean up after it, even if it fails
+  //       to launch (e.g., Firefox may restart itself when it gets launched, typically after having been updated, in
+  //       which case Puppeteer loses track of it and reports a failure, but the restarted Firefox keeps running). If
+  //       our browser fails to launch, then we try once more.
 
   let browser: Browser | undefined;
   let userDataDir = '';

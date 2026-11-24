@@ -6,10 +6,10 @@ import type { PlotData, PlotTrace } from '../index';
 //  - steps: staircases, i.e. near-vertical edges;
 //  - gaps: sine waves with some non-finite values, i.e. gaps that must be drawn as such (including by our level of
 //    detail, which must therefore also select the first point of each gap);
-//  - unsorted: Lissajous curves, i.e. X values that are not sorted (so neither the culling of invisible points nor
-//    the column level of detail can be used, but the path level of detail can);
-//  - unsortedNoisy: Lissajous curves with some noise, i.e. the worst case for drawing many unsorted points (since
-//    the path level of detail can hardly simplify them);
+//  - unsorted: Lissajous curves, i.e. X values that are not sorted (so neither the culling of invisible points nor the
+//    column level of detail can be used, but the path level of detail can);
+//  - unsortedNoisy: Lissajous curves with some noise, i.e. the worst case for drawing many unsorted points (since the
+//    path level of detail can hardly simplify them);
 //  - largeOffsets: sine waves with timestamp-like X values and large Y values, i.e. values that must still be drawn
 //    precisely once zoomed in a lot (which they wouldn't be using 32-bit floats).
 
@@ -157,8 +157,8 @@ const AXIS_TITLES: Record<DataKind, [x: string, y: string]> = {
 
 export const plotData = (kind: DataKind, nbOfTraces: number, nbOfPoints: number, instance: number): PlotData => {
   // Return the data of the given instance of our plot, which is different for each instance (since its curves have a
-  // different phase and its noise a different seed). Also, the Y values of our instances have different scales (i.e.
-  // 1, 10, 100, and 1,000, over and over), so that their Y tick labels have different widths and therefore their plots
+  // different phase and its noise a different seed). Also, the Y values of our instances have different scales (i.e. 1,
+  // 10, 100, and 1,000, over and over), so that their Y tick labels have different widths and therefore their plots
   // have different natural margins (see our shared margins in App.vue).
   // Note: our traces share their X values, if possible, to save memory.
 

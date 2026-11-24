@@ -1,5 +1,5 @@
-// Our plotting component, which is our plot widget (see PlotWidget.vue), as well as the types that are needed to use
-// it (e.g., to provide it with some data or to handle its events).
+// Our plotting component, which is our plot widget (see PlotWidget.vue), as well as the types that are needed to use it
+// (e.g., to provide it with some data or to handle its events).
 
 export type { IconName } from './src/common/icons';
 export type {

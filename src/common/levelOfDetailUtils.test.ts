@@ -68,8 +68,8 @@ const checkSelection = (
     if (k > nbOfColumns) {
       rangeEnd = end;
     } else {
-      // Our range ends after the last finite point that is before our boundary (i.e. the gaps that follow it are in
-      // the next range).
+      // Our range ends after the last finite point that is before our boundary (i.e. the gaps that follow it are in the
+      // next range).
 
       const boundary = k === nbOfColumns ? xMax : xMin + k * columnWidth;
 
@@ -168,9 +168,9 @@ const randomGap = (random: () => number, xValues: Float64Array, yValues: Float64
 };
 
 const randomPoints = (random: () => number, nbOfPoints: number, gaps = false): [Float64Array, Float64Array] => {
-  // Return some random points, with sorted X values (some of which are the same) and random Y values, some of which
-  // may be gaps (see randomGap()), either isolated ones or runs of them (of up to 1,000 points, so that some blocks
-  // have no finite points, while other blocks have no gap).
+  // Return some random points, with sorted X values (some of which are the same) and random Y values, some of which may
+  // be gaps (see randomGap()), either isolated ones or runs of them (of up to 1,000 points, so that some blocks have no
+  // finite points, while other blocks have no gap).
 
   const xValues = new Float64Array(nbOfPoints);
   const yValues = new Float64Array(nbOfPoints);
@@ -983,8 +983,8 @@ describe('selectPoints()', () => {
 
   it('has room for all the points that it may select, if they have no gap', () => {
     // Each of our ranges of points (i.e. before our X range, within each of our columns, and after our X range) has ten
-    // points, four of which get selected, and the first point of our selection gets selected on its own (see Note #5
-    // of levelOfDetailUtils.ts), so our selection doesn't need to grow.
+    // points, four of which get selected, and the first point of our selection gets selected on its own (see Note #5 of
+    // levelOfDetailUtils.ts), so our selection doesn't need to grow.
 
     const nbOfColumns = 10;
     const nbOfPoints = 10 * (nbOfColumns + 2);

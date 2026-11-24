@@ -7,16 +7,16 @@
 //          the polylines of a trace in pixels, as they get drawn, which costs O(number of points) and needs no memory.
 // Note #2: we use the same algorithm as our path level of detail (see Note #2 and Note #3 of
 //          pathLevelOfDetailUtils.ts), i.e. consecutive points are replaced with a segment, from the first to the last
-//          of them, as long as all of them are within our tolerance of that segment. This means that the first and
-//          last points of a polyline are always kept, as is any point that a polyline doesn't go (nearly) straight
-//          through (e.g., a peak of noisy data, which is therefore drawn as is).
+//          of them, as long as all of them are within our tolerance of that segment. This means that the first and last
+//          points of a polyline are always kept, as is any point that a polyline doesn't go (nearly) straight through
+//          (e.g., a peak of noisy data, which is therefore drawn as is).
 // Note #3: a polyline gets added to our path as soon as it starts (i.e. using moveTo()), but the end of its last
 //          segment only gets added once we know that it is its last point, i.e. once another polyline starts or once
 //          end() gets called, which must therefore be called once all of our polylines have been added.
 // Note #4: with a tolerance of zero, our polylines get added to our path as they are. This allows PlotWidget.vue to
 //          always give a SimplifiedPath to its path builder, whether or not it simplifies a trace, so that the calls
-//          that its path builder makes for (almost) every point of a trace always go to the same kind of object,
-//          which JavaScript engines handle faster (e.g., noisy traces get drawn up to about 20% faster in Chrome).
+//          that its path builder makes for (almost) every point of a trace always go to the same kind of object, which
+//          JavaScript engines handle faster (e.g., noisy traces get drawn up to about 20% faster in Chrome).
 // Note #5: we may be given a maximum number of points, in which case we stop simplifying our polylines (and add the
 //          rest of their points as they are) as soon as we have added more points than that to our path. This allows
 //          PlotWidget.vue to find out cheaply that a trace is not worth simplifying (e.g., noisy data, for which we
