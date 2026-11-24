@@ -6,11 +6,13 @@
 // Note #1: if a polyline carries on in a new path, then that path starts with the last segment of the polyline (or its
 //          last point, if it only has one point so far), so that the polyline gets drawn as if it was in one path (with
 //          the same joins). A polyline that starts a new path has nothing to carry on from.
-// Note #2: if a trace is faded (i.e. drawn with some transparency), then the parts of it that are in different paths
-//          and that overlap (including the segment that a path carries on from, see Note #1) get painted more than
-//          once, i.e. they look slightly less faded. This is only noticeable for a trace that has many more points than
-//          its paths can have and that overlaps itself (e.g., noisy data whose X values are not sorted), and it is
-//          still much better than drawing nothing (or drawing very slowly).
+// Note #2: if a trace is faded (i.e. drawn with some transparency, e.g., when another trace is highlighted, see
+//          highlightTrace() in PlotWidget.vue), then the segment that a path carries on from (see Note #1) gets painted
+//          twice, as do the parts of the trace that are in different paths and that overlap, i.e. they look slightly
+//          less faded. In Chrome, this only affects a trace that has more than MAX_PATH_POINTS points (e.g., an
+//          unsorted noisy trace of 10,000,000 points), but in Firefox, it affects any trace whose path has more than a
+//          few thousand points (e.g., a dense noisy trace), which then looks slightly darker every few thousand points.
+//          Either way, this is much better than drawing nothing (or drawing very slowly).
 
 export const MAX_PATH_POINTS = 1_000_000;
 
