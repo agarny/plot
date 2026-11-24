@@ -8,21 +8,20 @@ Key characteristics:
 - It does not rely on any UI framework (e.g., [PrimeVue](https://primevue.org/)) or CSS framework (e.g., [Tailwind CSS](https://tailwindcss.com/)).
 
 Contents:
-- [OpenCOR Plot](#opencor-plot)
-  - [Installation](#installation)
-  - [Usage](#usage)
-    - [Types](#types)
-    - [Data](#data)
-    - [Large and live data](#large-and-live-data)
-    - [Props](#props)
-    - [Events](#events)
-    - [Methods](#methods)
-    - [Interaction](#interaction)
-    - [Theming](#theming)
-  - [Development](#development)
-    - [Benchmarking](#benchmarking)
-    - [Releasing](#releasing)
-  - [License](#license)
+- [Installation](#installation)
+- [Usage](#usage)
+  - [Types](#types)
+  - [Data](#data)
+  - [Large and live data](#large-and-live-data)
+  - [Props](#props)
+  - [Events](#events)
+  - [Methods](#methods)
+  - [Interaction](#interaction)
+  - [Theming](#theming)
+- [Development](#development)
+  - [Benchmarking](#benchmarking)
+  - [Releasing](#releasing)
+- [License](#license)
 
 ## Installation
 

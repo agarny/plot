@@ -4372,6 +4372,7 @@ const linearPath = (
     const xPos = left + (x - xMin) * xFactor;
     const yPos = bottom - (y - yMin) * yFactor;
     const xPixel = Math.round(xPos);
+
     // Determine the edges of our plotting area (left, right, top, bottom) that our point is beyond, as a bit mask.
     // Note: we don't use a helper function here since this gets done for every point of our trace, and Chrome doesn't
     //       inline such a function (e.g., zooming 100 noisy traces of 1,000 points is then about 10% slower).

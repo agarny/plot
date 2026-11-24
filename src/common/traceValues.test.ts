@@ -197,7 +197,7 @@ describe('logValues()', () => {
     ]);
   });
 
-  it('uses a buffer with room for twice as many values, but no more than what is left of the buffer of the values', () => {
+  it('uses a buffer with room for twice as many values, but no more than what is left of their buffer', () => {
     const buffer = new Float64Array(10);
     const res = logValues(view(buffer, 3, 2));
 

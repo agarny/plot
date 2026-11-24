@@ -329,7 +329,7 @@ describe('update()', () => {
     checkLevels(lod, xValues, yValues, xValues.length);
   });
 
-  it('has sizes that are big enough for values that are all the same and for a range that Math.log2() rounds down', () => {
+  it('has big enough sizes for values that are all the same and for a range that Math.log2() rounds down', () => {
     for (const [x, y] of [
       [-5, 7],
       [0, 0]
