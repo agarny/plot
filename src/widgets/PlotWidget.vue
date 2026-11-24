@@ -4906,7 +4906,10 @@ const linearPaths: uPlot.Series.PathBuilder = (u: uPlot, seriesIndex: number, in
 
     simplifiedPath.end();
 
-    if (points.simplify) {
+    // Keep track of whether our trace is smooth (see Note #7 and Note #8 of our level of detail), unless we didn't give
+    // any point to our simplified path (e.g., if our trace cannot be seen), in which case we can't tell.
+
+    if (points.simplify && simplifiedPath.nbOfGivenPoints > 0) {
       smoothTraces[seriesIndex - 1] = simplifiedPath.reducedTo(SMOOTH_TRACE_RATIO);
     }
 
