@@ -1,13 +1,16 @@
 // A path that gets split into several paths, so that none of them has more than a given number of points (see
 // PlotWidget.vue). Indeed, Chrome (i.e. Skia) silently draws nothing for a path that has more than about 1,870,000
 // points (e.g., an unsorted noisy trace of 10,000,000 points, which no level of detail can reduce), be it a Path2D or
-// an SVG path element, while Firefox and Safari draw such a path fine.
-// Note #1: a new path carries on from the last segment of the previous path (if any), i.e. it starts with that segment,
-//          so that the join between them is drawn as if they were one path.
+// an SVG path element, while Firefox only strokes a path quickly if it has no more than a few thousand points (see
+// linearPaths() in PlotWidget.vue).
+// Note #1: if a polyline carries on in a new path, then that path starts with the last segment of the polyline (or its
+//          last point, if it only has one point so far), so that the polyline gets drawn as if it was in one path (with
+//          the same joins). A polyline that starts a new path has nothing to carry on from.
 // Note #2: if a trace is faded (i.e. drawn with some transparency), then the parts of it that are in different paths
-//          and that overlap get painted more than once, i.e. they look slightly less faded. This is only noticeable for
-//          a trace that has many more points than pixels (and that overlaps itself, e.g., noisy data), and it is still
-//          much better than drawing nothing.
+//          and that overlap (including the segment that a path carries on from, see Note #1) get painted more than
+//          once, i.e. they look slightly less faded. This is only noticeable for a trace that has many more points than
+//          its paths can have and that overlaps itself (e.g., noisy data whose X values are not sorted), and it is
+//          still much better than drawing nothing (or drawing very slowly).
 
 export const MAX_PATH_POINTS = 1_000_000;
 

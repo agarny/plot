@@ -161,7 +161,7 @@ import { createChunkedPath, MAX_PATH_POINTS } from '../common/chunkedPathUtils';
 import * as common from '../common/common';
 import * as levelOfDetailUtils from '../common/levelOfDetailUtils';
 import * as pathLevelOfDetailUtils from '../common/pathLevelOfDetailUtils';
-import { strokeOutlinePolylines } from '../common/strokeOutlineUtils';
+import { SimplifiedPath } from '../common/simplifiedPathUtils';
 import {
   type LogValues,
   type ValuesStatistics,
@@ -259,7 +259,8 @@ export interface PlotContextMenuEvent {
 // Note #2: customContextMenu is whether we should emit a contextMenu event rather than show our own context menu (see
 //          PlotContextMenuEvent).
 // Note #3: levelOfDetail is whether we should only go through the points that are needed for our traces to look the
-//          same (see linearPathPoints()), which is what we should normally do. It can, however, be disabled to see
+//          same (see linearPathPoints()) and only draw as many segments as are needed for them to look the same (see
+//          Note #6 of our level of detail), which is what we should normally do. It can, however, be disabled to see
 //          (e.g., in our demo) how much it helps.
 
 const props = withDefaults(
@@ -424,9 +425,7 @@ const pointCounts = (): PlotPointCounts => {
 const memoryUsage = (): PlotMemoryUsage => {
   // Return the number of bytes that we use for our own purposes (see PlotMemoryUsage).
   // Note #1: like pointCounts(), this is not reactive, i.e. it is meant to be polled.
-  // Note #2: our statistics (see plotValues()) only use a few bytes per trace, so we don't count them. Neither do we
-  //          count the buffers that we use to outline our traces in Firefox, since they are shared between all of our
-  //          instances (see linearPaths() and strokeOutlineUtils.ts).
+  // Note #2: our statistics (see plotValues()) only use a few bytes per trace, so we don't count them.
 
   const res: PlotMemoryUsage = {
     levelOfDetail: selectionXValues.byteLength + selectionYValues.byteLength,
@@ -1478,7 +1477,14 @@ const svgDocument = (scale: number = 1): SvgDocument => {
     const tracePath = createChunkedPath(svgPath);
     const traceAttributes = `stroke="${escapeXml(color)}" stroke-width="${svgNumber(traceLineWidth)}" stroke-linejoin="round" fill="none" clip-path="url(#traces)"`;
 
-    linearPath(tracePath, xValues, yValues, 0, Math.min(xValues.length, yValues.length) - 1, area);
+    // Note: we don't simplify our trace, so that it is exactly what we would draw without our level of detail, but we
+    //       still use a SimplifiedPath (see Note #4 of simplifiedPathUtils.ts).
+
+    const simplifiedPath = new SimplifiedPath(tracePath, 0);
+
+    linearPath(simplifiedPath, xValues, yValues, 0, Math.min(xValues.length, yValues.length) - 1, area);
+
+    simplifiedPath.end();
 
     for (const path of tracePath.paths) {
       res.push(svgPathElement(path, traceAttributes));
@@ -4276,7 +4282,7 @@ const drawZeroLines = (u: uPlot): void => {
 // Traces and markers.
 
 const linearPath = (
-  path: Pick<Path, 'moveTo' | 'lineTo'>,
+  path: SimplifiedPath, // Always a SimplifiedPath, even if we don't simplify (see Note #4 of simplifiedPathUtils.ts).
   xValues: Float64Array,
   yValues: Float64Array,
   index0: number,
@@ -4304,6 +4310,13 @@ const linearPath = (
   const bottom = top + height;
   const right = left + width;
   const margin = LINE_WIDTH * area.pxRatio;
+
+  // The edges beyond which a point is outside our plotting area (see Note #4 above).
+
+  const outLeft = left - margin;
+  const outRight = right + margin;
+  const outTop = top - margin;
+  const outBottom = bottom + margin;
   const end = Math.min(index1, xValues.length - 1, yValues.length - 1);
   let penDown = false;
   let hasPendingPoint = false;
@@ -4323,15 +4336,6 @@ const linearPath = (
   let lastIndex = -1;
   let lastXPos = 0;
   let lastYPos = 0;
-
-  const outCode = (xPos: number, yPos: number): number => {
-    // Return a bit mask of the edges of our plotting area (left, right, top, bottom) that the given point is beyond.
-
-    return (
-      (xPos < left - margin ? 1 : xPos > right + margin ? 2 : 0) |
-      (yPos < top - margin ? 4 : yPos > bottom + margin ? 8 : 0)
-    );
-  };
 
   const drawColumn = (): void => {
     // Draw the minimum and maximum points of our current column (in their original order) unless they are its first
@@ -4408,7 +4412,12 @@ const linearPath = (
     const xPos = left + (x - xMin) * xFactor;
     const yPos = bottom - (y - yMin) * yFactor;
     const xPixel = Math.round(xPos);
-    const pointOutCode = outCode(xPos, yPos);
+    // Determine the edges of our plotting area (left, right, top, bottom) that our point is beyond, as a bit mask.
+    // Note: we don't use a helper function here since this gets done for every point of our trace, and Chrome doesn't
+    //       inline such a function (e.g., zooming 100 noisy traces of 1,000 points is then about 10% slower).
+
+    const pointOutCode =
+      (xPos < outLeft ? 1 : xPos > outRight ? 2 : 0) | (yPos < outTop ? 4 : yPos > outBottom ? 8 : 0);
 
     // Make sure that we have a previous point and that the segment between it and our current point may be visible.
     // If not, then we break our path and keep track of our current point, which may be the start of a visible
@@ -4508,18 +4517,61 @@ const linearPath = (
 //          pathLevelOfDetailUtils.ts), and only give them to linearPath(). For a smooth trace, this means a few
 //          thousand rather than millions of points, but not for a noisy trace (which our path level of detail can't
 //          reduce, in which case we give all of its points to linearPath()).
+// Note #6: linearPath() draws up to four points per pixel column, so a smooth trace which X values are sorted would get
+//          drawn using thousands of segments, while a few hundred of them would make it look the same. So, unless its
+//          points come from our path level of detail (which already simplifies it, see Note #5 and Note #7), we
+//          simplify the path of our trace within SIMPLIFIED_PATH_TOLERANCE canvas pixels of what it would otherwise
+//          look like (see simplifiedPathUtils.ts), since stroking a path costs about the same for each of its segments.
+// Note #7: selecting the points of a trace which X values are sorted using our level of detail (see Note #1) costs
+//          O(number of pixel columns), which is much more than what our path level of detail costs for a smooth trace
+//          (e.g., about 0.2 ms rather than 0.01 ms per trace in Chrome). So, if our trace was smooth the last time
+//          that we simplified its path (i.e. if its simplified path had at most SMOOTH_TRACE_RATIO times the number of
+//          points that it would otherwise have had, see Note #6 and simplifiedPathUtils.ts), then we only go through
+//          the points of our path level of detail that cover our visible points, if it has a level for our tolerance.
+//          We don't do this for a trace that is not smooth (e.g., noisy data), since our path level of detail would
+//          cost O(number of points) to find out that it can't reduce it (and again whenever its levels get rebuilt,
+//          e.g., while a simulation is running). Neither do we do this for a trace that has new points (e.g., while a
+//          simulation is running), since our path level of detail would then have to process them (and be rebuilt
+//          whenever the range of its values gets bigger), while our (column) level of detail only selects the points
+//          of the columns that they are in (see Note #6 of levelOfDetailUtils.ts).
+// Note #8: simplifying the path of a trace that is not smooth (e.g., noisy data) hardly reduces its number of segments
+//          while it costs some time (e.g., about 0.2 ms per noisy trace in Chrome), so we only simplify the path of a
+//          trace that was not smooth the last time that we simplified it once every SMOOTHNESS_CHECK_INTERVAL times
+//          that we build it, so that we still find out whether it has become smooth (e.g., once zoomed in). Even then,
+//          we stop simplifying it as soon as we know that it is not smooth (see Note #5 of simplifiedPathUtils.ts).
 
 const PATH_LOD_TOLERANCE = 0.25; // In canvas pixels, i.e. our traces are off by at most about 0.35 canvas pixels.
+const SIMPLIFIED_PATH_TOLERANCE = 0.25; // In canvas pixels.
+const SMOOTH_TRACE_RATIO = 0.25; // See Note #7 above.
+const SMOOTHNESS_CHECK_INTERVAL = 16; // See Note #8 above.
 
 interface LinearPathPoints {
   xValues: Float64Array; // X values of the points to give to linearPath().
   yValues: Float64Array; // Y values of the points to give to linearPath().
   index0: number; // Index of the first point (included) to give to linearPath().
   index1: number; // Index of the last point (included) to give to linearPath().
+  simplify: boolean; // Whether to simplify the path that linearPath() builds for our points (see Note #6 above).
 }
 
 const traceLods: levelOfDetailUtils.LevelOfDetail[] = [];
 const pathLods: pathLevelOfDetailUtils.PathLevelOfDetail[] = [];
+const smoothTraces: boolean[] = []; // Whether our traces were smooth the last time that we simplified their path.
+const unsimplifiedPaths: number[] = []; // Number of paths built since then for our traces that were not smooth.
+const traceCounts: number[] = []; // Number of points of our traces the last time that we built their path.
+
+const simplifyPath = (traceIndex: number): boolean => {
+  // Return whether we should simplify the path that we are about to build for the given trace (see Note #8 above).
+
+  if (smoothTraces[traceIndex] !== false) {
+    return true;
+  }
+
+  const nbOfUnsimplifiedPaths = ((unsimplifiedPaths[traceIndex] ?? 0) + 1) % SMOOTHNESS_CHECK_INTERVAL;
+
+  unsimplifiedPaths[traceIndex] = nbOfUnsimplifiedPaths;
+
+  return nbOfUnsimplifiedPaths === 0;
+};
 
 const updatedTraceLod = (
   traceIndex: number,
@@ -4583,9 +4635,14 @@ const selectionPoints = (
   xValues: Float64Array,
   yValues: Float64Array,
   indices: Int32Array,
-  nbOfPoints: number
+  start: number,
+  end: number,
+  simplify: boolean
 ): LinearPathPoints => {
-  // Return the given points of the given trace, so that they can be given to linearPath().
+  // Return the points of the given trace which indices are from the given start (included) to the given end (excluded)
+  // of the given indices, so that they can be given to linearPath().
+
+  const nbOfPoints = end - start;
 
   if (selectionXValues.length < nbOfPoints) {
     selectionXValues = new Float64Array(indices.length);
@@ -4593,7 +4650,7 @@ const selectionPoints = (
   }
 
   for (let i = 0; i < nbOfPoints; ++i) {
-    const index = indices[i] as number;
+    const index = indices[start + i] as number;
 
     selectionXValues[i] = xValues[index] as number;
     selectionYValues[i] = yValues[index] as number;
@@ -4603,8 +4660,29 @@ const selectionPoints = (
     xValues: selectionXValues,
     yValues: selectionYValues,
     index0: 0,
-    index1: nbOfPoints - 1
+    index1: nbOfPoints - 1,
+    simplify
   };
+};
+
+const lowerBound = (indices: Int32Array, count: number, index: number): number => {
+  // Return the position of the first of the given (sorted) indices that is not less than the given index, or the given
+  // number of indices if there is none.
+
+  let low = 0;
+  let high = count;
+
+  while (low < high) {
+    const middle = (low + high) >>> 1;
+
+    if ((indices[middle] as number) < index) {
+      low = middle + 1;
+    } else {
+      high = middle;
+    }
+  }
+
+  return low;
 };
 
 const linearPathPoints = (
@@ -4616,13 +4694,23 @@ const linearPathPoints = (
   area: PathArea
 ): LinearPathPoints => {
   // Return the points of the given trace that linearPath() needs to go through (see Note #1 above), i.e. all of them if
-  // we are not to use our level of detail (see Note #3 of our props).
+  // we are not to use our level of detail (see Note #3 of our props), in which case we don't simplify our path either
+  // (so that our trace gets drawn as is, see Note #6 above).
 
-  const res: LinearPathPoints = { xValues, yValues, index0, index1 };
+  const res: LinearPathPoints = {
+    xValues,
+    yValues,
+    index0,
+    index1,
+    simplify: props.levelOfDetail && simplifyPath(seriesIndex - 1)
+  };
   const count = Math.min(xValues.length, yValues.length);
+  const isUnchanged = traceCounts[seriesIndex - 1] === count;
   const nbOfColumns = Math.ceil(area.width) + 1;
   const minNbOfPoints = levelOfDetailUtils.MIN_POINTS_PER_COLUMN * nbOfColumns;
   const xFactor = area.width / (area.xMax - area.xMin);
+
+  traceCounts[seriesIndex - 1] = count;
 
   if (!props.levelOfDetail || count <= minNbOfPoints || !(xFactor > 0) || !Number.isFinite(xFactor)) {
     return res;
@@ -4638,7 +4726,7 @@ const linearPathPoints = (
   if (lod.sortedLength < count) {
     const level = selectedPathLevel(seriesIndex - 1, xValues, yValues, count, area);
 
-    return level ? selectionPoints(xValues, yValues, level.indices, level.count) : res;
+    return level ? selectionPoints(xValues, yValues, level.indices, 0, level.count, false) : res;
   }
 
   // Only go through our visible points, if our X values are sorted.
@@ -4659,10 +4747,7 @@ const linearPathPoints = (
   res.index0 = start;
   res.index1 = end - 1;
 
-  // Only go through the points that linearPath() would draw, if we have many visible points.
-  // Note: linearPath() rounds the X position of a point to determine its pixel column, so our columns start half a
-  //       pixel before the pixel column of the left edge of our plotting area, less the columns that cover the margin
-  //       of linearPath() (and likewise after its right edge).
+  // Only select the points that we go through, if we have many visible points.
 
   if (end - start <= minNbOfPoints) {
     return res;
@@ -4670,6 +4755,32 @@ const linearPathPoints = (
 
   const nbOfMarginColumns = Math.ceil(margin) + 1;
   const nbOfSelectionColumns = nbOfColumns + 2 * nbOfMarginColumns;
+
+  // Only go through the points of our path level of detail that cover our visible points, i.e. from the last one that
+  // is not after our first visible point to the first one that is not before our last visible point, if our trace was
+  // smooth the last time that we simplified it, if its number of points hasn't changed since we last built its path,
+  // if our path level of detail has a level that keeps our trace within our tolerance, and if that means going through
+  // fewer points than our (column) level of detail could select, i.e. four per column (see Note #7 above).
+
+  const level =
+    smoothTraces[seriesIndex - 1] && isUnchanged
+      ? selectedPathLevel(seriesIndex - 1, xValues, yValues, count, area)
+      : undefined;
+
+  if (level) {
+    const levelStart = Math.max(0, lowerBound(level.indices, level.count, start + 1) - 1);
+    const levelEnd = Math.min(level.count, lowerBound(level.indices, level.count, end - 1) + 1);
+
+    if (levelEnd - levelStart <= 4 * nbOfSelectionColumns) {
+      return selectionPoints(xValues, yValues, level.indices, levelStart, levelEnd, false);
+    }
+  }
+
+  // Otherwise, only go through the points that linearPath() would draw (see Note #1 above).
+  // Note: linearPath() rounds the X position of a point to determine its pixel column, so our columns start half a
+  //       pixel before the pixel column of the left edge of our plotting area, less the columns that cover the margin
+  //       of linearPath() (and likewise after its right edge).
+
   const xMin = area.xMin + (Math.round(area.left) - 0.5 - area.left - nbOfMarginColumns) / xFactor;
   const xMax = xMin + nbOfSelectionColumns / xFactor;
   const selection = levelOfDetailUtils.selectPoints(
@@ -4683,7 +4794,7 @@ const linearPathPoints = (
     nbOfSelectionColumns
   );
 
-  return selectionPoints(xValues, yValues, selection.indices, selection.nbOfPoints);
+  return selectionPoints(xValues, yValues, selection.indices, 0, selection.nbOfPoints, res.simplify);
 };
 
 // The number of points that we went through for each of our traces the last time that we built its path (see
@@ -4691,23 +4802,51 @@ const linearPathPoints = (
 
 const drawnPoints: number[] = [];
 
-// In Firefox, we fill the outline of the stroke of a trace rather than stroke it (see strokeOutlineUtils.ts) if its
-// path has more than OUTLINE_MIN_POINTS points, is dense (i.e. goes up and down by at least OUTLINE_MIN_TRAVEL line
-// widths per pixel of width, e.g. noisy data), and can be outlined (i.e. if its X values are sorted).
-// Note #1: Firefox strokes such a path very slowly, but it fills its outline quickly. However, outlining a trace takes
-//          a few milliseconds, so it is only worth it for a path that has many points. Indeed, Firefox strokes a dense
-//          path quickly up to about 3,000 points, but much more slowly from about 4,500 points (e.g., 102 FPS rather
-//          than 519 FPS when panning a plot with three noisy traces), while outlining three full-width noisy traces
-//          costs about 8 to 10 ms per frame, whatever their number of points. For example, when panning a plot with
-//          three noisy traces of 1,000,000 points, we get 86 to 107 FPS rather than 5 to 10 FPS.
-// Note #2: we decide whether to outline a trace every time that we build its path, since its number of points depends
-//          on our ranges (e.g., a trace that we zoom in on has fewer visible points, so it may get stroked again).
-// Note #3: other browsers stroke dense paths quickly, so we only outline traces in Firefox.
+// Firefox's accelerated Canvas 2D (i.e. DrawTargetWebgl) needs some help to stroke our traces quickly.
+// Note #1: Firefox only strokes a path on the GPU if it has no more than 4,000 points (see the
+//          gfx.canvas.accelerated.gpu-path-complexity preference) and if the GPU data of its stroke fits in its buffer,
+//          and otherwise rasterises it in software, which is very slow for a dense path (e.g., 135 ms rather than 6 ms
+//          per frame for three noisy traces of 10,000 points). So, in Firefox, we split the path of a trace into paths
+//          of at most FIREFOX_MAX_PATH_POINTS points (see chunkedPathUtils.ts), i.e. well below 4,000 points so that
+//          the GPU data of their stroke also fits in its buffer.
+// Note #2: Firefox stops accelerating a canvas if, for more than 30% of its frames, more than 66% of its draws needed
+//          new GPU data (i.e. were "cache misses"), which is the case of every path that we stroke since our paths are
+//          new every time that our plot gets drawn (e.g., while panning or zooming). So, with many traces (e.g., 100
+//          noisy traces of 1,000 points), our canvas would stop being accelerated, i.e. would get drawn in software,
+//          which is many times slower (e.g., 630 ms rather than 20 ms per frame). To prevent this, we fill a
+//          transparent pixel for each path that we stroke, which Firefox counts as a draw that needs no new GPU data,
+//          while it draws nothing.
 
-const OUTLINE_MIN_POINTS = 4000; // Number of points that a path must have more than for it to be outlined.
-const OUTLINE_MIN_TRAVEL = 4; // Vertical travel (in line widths) per pixel of width that a dense path has at least.
+const FIREFOX_MAX_PATH_POINTS = 2000; // See Note #1 above.
 
 const isFirefox = typeof navigator !== 'undefined' && navigator.userAgent.includes('Firefox/');
+
+let nbOfStrokedPaths = 0; // Number of paths that we have built since our plot was last drawn (see Note #2 above).
+
+const fillTransparentPixels = (u: uPlot): void => {
+  // Fill a transparent pixel for each path that we have built since our plot was last drawn, if we are in Firefox (see
+  // Note #2 above).
+  // Note: this gets called once our traces have been drawn (see the draw hook in createPlot()), and uPlot caches the
+  //       state of its context, so we must restore it once we are done.
+
+  if (!isFirefox || !nbOfStrokedPaths) {
+    return;
+  }
+
+  const context = u.ctx;
+
+  context.save();
+
+  context.fillStyle = 'transparent';
+
+  for (let i = 0; i < nbOfStrokedPaths; ++i) {
+    context.fillRect(0, 0, 1, 1);
+  }
+
+  context.restore();
+
+  nbOfStrokedPaths = 0;
+};
 
 class SameStylePaths extends Map<string, Path2D> {
   // Some paths that uPlot strokes one after the other, using the same style. Indeed, uPlot strokes each path of a map
@@ -4732,57 +4871,47 @@ class SameStylePaths extends Map<string, Path2D> {
 
 const linearPaths: uPlot.Series.PathBuilder = (u: uPlot, seriesIndex: number, index0: number, index1: number) => {
   // Use our linear path builder for our trace (see linearPath()), and our level of detail (see linearPathPoints()),
-  // keeping track of the number of points that we go through. In Firefox, fill the outline of our trace rather than
-  // stroke it, if needed (see above). Also, split our path into several paths, if needed (see chunkedPathUtils.ts).
+  // keeping track of the number of points that we go through, and simplify our path, if needed (see Note #6 of our
+  // level of detail). Also, split our path into several paths, if needed (see chunkedPathUtils.ts and, for Firefox,
+  // above).
   // Note: linearPath() draws each of the points that it goes through at most once, so our path may only have more than
-  //       MAX_PATH_POINTS points if we go through more than that.
+  //       a given number of points if we go through more than that.
 
   const [xValues, yValues] = seriesData(u, seriesIndex) ?? [];
   const area = pathArea(u);
   let strokes: Path2D[] = [];
-  let outline: Path2D | null = null;
   let nbOfDrawnPoints = 0;
 
   if (xValues && yValues && area) {
     const points = linearPathPoints(seriesIndex, xValues, yValues, index0, index1, area);
     const lastIndex = Math.min(points.index1, points.xValues.length - 1, points.yValues.length - 1);
+    const maxPathPoints = isFirefox ? FIREFOX_MAX_PATH_POINTS : MAX_PATH_POINTS;
 
     nbOfDrawnPoints = Math.max(0, lastIndex - points.index0 + 1);
 
-    const stroke = nbOfDrawnPoints > MAX_PATH_POINTS ? createChunkedPath(() => new Path2D()) : new Path2D();
+    const stroke =
+      nbOfDrawnPoints > maxPathPoints ? createChunkedPath(() => new Path2D(), maxPathPoints) : new Path2D();
+    const simplifiedPath = new SimplifiedPath(
+      stroke,
+      points.simplify ? SIMPLIFIED_PATH_TOLERANCE : 0,
+      SMOOTH_TRACE_RATIO * nbOfDrawnPoints
+    );
+
+    linearPath(simplifiedPath, points.xValues, points.yValues, points.index0, points.index1, area);
+
+    simplifiedPath.end();
+
+    if (points.simplify) {
+      smoothTraces[seriesIndex - 1] = simplifiedPath.reducedTo(SMOOTH_TRACE_RATIO);
+    }
 
     strokes = stroke instanceof Path2D ? [stroke] : stroke.paths;
-
-    if (isFirefox) {
-      const lineWidth = LINE_WIDTH * area.pxRatio;
-
-      strokeOutlinePolylines.clear();
-
-      linearPath(strokeOutlinePolylines, points.xValues, points.yValues, points.index0, points.index1, area);
-
-      if (
-        strokeOutlinePolylines.nbOfPoints() > OUTLINE_MIN_POINTS &&
-        strokeOutlinePolylines.isDense(lineWidth, OUTLINE_MIN_TRAVEL)
-      ) {
-        outline = new Path2D();
-
-        strokeOutlinePolylines.addOutline(outline, lineWidth);
-      } else {
-        strokeOutlinePolylines.addPolylines(stroke);
-      }
-    } else {
-      linearPath(stroke, points.xValues, points.yValues, points.index0, points.index1, area);
-    }
+    nbOfStrokedPaths += strokes.length;
   }
 
   drawnPoints[seriesIndex - 1] = nbOfDrawnPoints;
 
-  // Fill our outline, if we have one, using the colour of our trace, which uPlot uses rather than the fill style of our
-  // series (see drawPath() in uPlot). Otherwise, stroke our path or paths.
-
-  if (outline) {
-    return { stroke: null, fill: outline, _fill: seriesColor(seriesIndex), clip: null, flags: 0 };
-  }
+  // Stroke our path or paths.
 
   return {
     stroke: strokes.length > 1 ? new SameStylePaths(seriesColor(seriesIndex), strokes) : (strokes[0] ?? null),
@@ -4837,11 +4966,12 @@ const markerPaths: uPlot.Series.Points.PathBuilder = (u: uPlot, seriesIndex: num
 };
 
 const forgetRemovedTraces = (nbOfTraces: number): void => {
-  // Forget about the levels of detail and hover searches of the traces that we don't have anymore (e.g., if our data
-  // now has fewer traces, or none at all), so that they don't keep using memory (and a reference to our old data).
+  // Forget about the levels of detail, smoothness, hover searches, and drawn points of the traces that we don't have
+  // anymore (e.g., if our data now has fewer traces, or none at all), so that they don't keep using memory (and a
+  // reference to our old data).
   // Note: this gets called whenever our data gets updated (see plotData()).
 
-  for (const array of [pathLods, traceLods, hoverSearches, drawnPoints]) {
+  for (const array of [pathLods, traceLods, smoothTraces, unsimplifiedPaths, traceCounts, hoverSearches, drawnPoints]) {
     if (array.length > nbOfTraces) {
       array.length = nbOfTraces;
     }
@@ -5548,6 +5678,7 @@ const createPlot = (width: number, height: number): void => {
         drawClear: [resolveCanvasColors],
         draw: [
           (u: uPlot) => {
+            fillTransparentPixels(u);
             updatePlotRect(u);
             updateLivePoints(u);
             updateMarginsAsync();

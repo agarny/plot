@@ -106,7 +106,7 @@ Notes:
 
 ### Large and live data
 
-The component only goes through the points that are needed for a trace to look the same, so a trace with millions of points can be zoomed, panned, and hovered smoothly.
+The component only goes through the points that are needed for a trace to look the same, and draws it using only as many segments as are needed for it to look the same (within a quarter of a canvas pixel), so a trace with millions of points can be zoomed, panned, and hovered smoothly.
 
 The data is updated by giving the component a new [`data`](#props) object, since changes made to an existing `data` object (e.g., to its `traces` array or to one of its traces) are not watched.
 
@@ -139,7 +139,7 @@ Also set the [`live`](#props) prop while the data is live, so that the last poin
 | `levelOfDetail` | `boolean` | `true` | Whether to only go through the points that are needed for a trace to look the same when drawing it (see [Large and live data](#large-and-live-data)). Hovering a trace whose X values are sorted always does. Only meant to be disabled to see how much it helps. |
 | `live` | `boolean` | `false` | Whether the data is live (e.g., while a simulation is running), in which case the last point of each visible trace is marked. |
 
-To draw traces without our level of detail, use `:levelOfDetail="false"`. Our path builder then goes through every point of every trace (still only drawing the first, minimum, maximum, and last points of each pixel column, so that a trace looks the same). Unlike uPlot's own, our path builder handles gaps (`NaN` values) and traces whose X values are not sorted (e.g., phase plots) at any number of points, and in Firefox, it fills the outline of a dense trace (e.g., noisy data) with many points rather than stroke it, since Firefox strokes such a trace very slowly. This is also the reference that our optimisations can be benchmarked against.
+To draw traces without our level of detail, use `:levelOfDetail="false"`. Our path builder then goes through every point of every trace (still only drawing the first, minimum, maximum, and last points of each pixel column, so that a trace looks the same) and draws all of those points (rather than only as many as are needed for a trace to look the same). Unlike uPlot's own, our path builder handles gaps (e.g., `NaN` values) and traces whose X values are not sorted (e.g., phase plots) at any number of points (splitting a path of more than 1,000,000 points into several paths, since Chrome draws nothing for a path of more than about 1,870,000 points), and in Firefox, it splits a path of more than 2,000 points into several paths, since Firefox only strokes a path quickly if it has no more than a few thousand points. This is also the reference that our optimisations can be benchmarked against.
 
 ### Events
 

@@ -143,6 +143,23 @@ describe('createChunkedPath()', () => {
     expect(chunkedCommands([...polyline(0, 2), ...polyline(3, 4)], 3)).toEqual([polyline(0, 2), polyline(3, 4)]);
   });
 
+  it('carries on from a polyline that starts with a line, like a canvas would', () => {
+    // Note: a canvas treats a line without any current point as a move, so our polyline starts at (0, 0).
+
+    const commands: Command[] = [
+      ['L', 0, 0],
+      ['L', 1, 10],
+      ['L', 2, 20],
+      ['L', 3, 30]
+    ];
+
+    expect(chunkedCommands(commands, 3)).toEqual([commands.slice(0, 3), polyline(1, 3)]);
+    expect(chunkedCommands([['L', 0, 0], ...polyline(1, 3)], 3)).toEqual([
+      [['L', 0, 0], ...polyline(1, 2)],
+      polyline(1, 3)
+    ]);
+  });
+
   it('has at least three points per path', () => {
     const commands = polyline(0, 6);
 
