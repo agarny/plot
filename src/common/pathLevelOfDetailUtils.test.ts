@@ -2,12 +2,14 @@ import { describe, expect, it } from 'bun:test';
 
 import { isFinitePoint, randomGenerator } from '../../test.utils';
 import {
+  coveringRange,
   create,
   type PathLevelOfDetail,
   invalidate,
   MAX_LEVEL_RATIO,
   MIN_NB_OF_POINTS_TO_DROP_LEVELS,
   memoryUsage,
+  type PathLevel,
   selectLevel,
   update,
   updatedLevel
@@ -725,5 +727,77 @@ describe('selectLevel()', () => {
 
     expect(selectLevel(lod, xValues, yValues, 0.25, 8)?.level).toBe(1);
     expect(selectLevel(lod, xValues, yValues, 0.2, 8)).toBeUndefined();
+  });
+});
+
+// coveringRange().
+
+describe('coveringRange()', () => {
+  const checkCoveringRange = (level: PathLevel, start: number, end: number): void => {
+    // Check that the given range of points of our trace is covered by the points of our level in its covering range,
+    // i.e. that they go from at or before our first point to at or after our last point (unless our level has no such
+    // points), and that its covering range is as small as possible.
+
+    const [levelStart, levelEnd] = coveringRange(level, start, end);
+    const indices = level.indices;
+
+    expect(levelStart).toBeGreaterThanOrEqual(0);
+    expect(levelStart).toBeLessThan(levelEnd);
+    expect(levelEnd).toBeLessThanOrEqual(level.count);
+
+    if (levelStart > 0) {
+      expect(indices[levelStart]).toBeLessThanOrEqual(start);
+    }
+
+    if (levelStart + 1 < level.count) {
+      expect(indices[levelStart + 1]).toBeGreaterThan(start);
+    }
+
+    if (levelEnd < level.count) {
+      expect(indices[levelEnd - 1]).toBeGreaterThanOrEqual(end - 1);
+    }
+
+    if (levelEnd >= 2) {
+      expect(indices[levelEnd - 2]).toBeLessThan(end - 1);
+    }
+  };
+
+  it('returns the points of a level that cover the given points of our trace', () => {
+    // Our trace is a zig-zag with corners at points 10 and 20, so its finer levels have points 0, 10, 20, and 30.
+
+    const [xValues, yValues] = points(
+      Array.from({ length: 31 }, (_value, i): [number, number] => [i, i <= 10 ? i : i <= 20 ? 20 - i : i - 20])
+    );
+    const lod = levelOfDetail(xValues, yValues);
+    const level = updatedLevel(lod, xValues, yValues, 3) as PathLevel;
+
+    expect(Array.from(level.indices.subarray(0, level.count))).toEqual([0, 10, 20, 30]);
+
+    expect(coveringRange(level, 0, 31)).toEqual([0, 4]);
+    expect(coveringRange(level, 12, 18)).toEqual([1, 3]);
+    expect(coveringRange(level, 10, 21)).toEqual([1, 3]);
+    expect(coveringRange(level, 10, 22)).toEqual([1, 4]);
+    expect(coveringRange(level, 9, 21)).toEqual([0, 3]);
+    expect(coveringRange(level, 25, 26)).toEqual([2, 4]);
+    expect(coveringRange(level, 30, 31)).toEqual([3, 4]);
+    expect(coveringRange(level, 0, 1)).toEqual([0, 1]);
+  });
+
+  it('covers any range of points of a trace with gaps, as few points of a level as possible', () => {
+    const random = randomGenerator(42);
+    const nbOfPoints = 20000;
+    const [xValues, yValues] = randomWalk(random, nbOfPoints, true);
+    const lod = levelOfDetail(xValues, yValues);
+
+    for (const level of lod.levels) {
+      for (let i = 0; i < 1000; ++i) {
+        const start = Math.floor(nbOfPoints * random());
+        const end = start + 1 + Math.floor((nbOfPoints - start) * random() ** 3);
+
+        checkCoveringRange(level, start, end);
+      }
+
+      checkCoveringRange(level, 0, nbOfPoints);
+    }
   });
 });

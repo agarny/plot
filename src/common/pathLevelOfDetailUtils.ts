@@ -669,3 +669,35 @@ export const selectLevel = (
 
   return updatedLevel(lod, xValues, yValues, level);
 };
+
+const lowerBound = (indices: Int32Array, count: number, index: number): number => {
+  // Return the position of the first of the given (sorted) indices that is not less than the given index, or the given
+  // number of indices if there is none.
+
+  let low = 0;
+  let high = count;
+
+  while (low < high) {
+    const middle = (low + high) >>> 1;
+
+    if ((indices[middle] as number) < index) {
+      low = middle + 1;
+    } else {
+      high = middle;
+    }
+  }
+
+  return low;
+};
+
+export const coveringRange = (level: PathLevel, start: number, end: number): [start: number, end: number] => {
+  // Return the range of the points of the given level (i.e. of their positions in its indices) that cover the points of
+  // our trace from the given start (included) to the given end (excluded), i.e. from its last point that is not after
+  // our first point (or its first point, if there is none) to its first point that is not before our last point (or its
+  // last point, if there is none), so that its points in that range draw all of its segments that our points are on.
+
+  return [
+    Math.max(0, lowerBound(level.indices, level.count, start + 1) - 1),
+    Math.min(level.count, lowerBound(level.indices, level.count, end - 1) + 1)
+  ];
+};

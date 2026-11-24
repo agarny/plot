@@ -4634,26 +4634,6 @@ const selectionPoints = (
   };
 };
 
-const lowerBound = (indices: Int32Array, count: number, index: number): number => {
-  // Return the position of the first of the given (sorted) indices that is not less than the given index, or the given
-  // number of indices if there is none.
-
-  let low = 0;
-  let high = count;
-
-  while (low < high) {
-    const middle = (low + high) >>> 1;
-
-    if ((indices[middle] as number) < index) {
-      low = middle + 1;
-    } else {
-      high = middle;
-    }
-  }
-
-  return low;
-};
-
 const linearPathPoints = (
   seriesIndex: number,
   xValues: Float64Array,
@@ -4730,11 +4710,11 @@ const linearPathPoints = (
   const nbOfMarginColumns = Math.ceil(margin) + 1;
   const nbOfSelectionColumns = nbOfColumns + 2 * nbOfMarginColumns;
 
-  // Only go through the points of our path level of detail that cover our visible points, i.e. from the last one that
-  // is not after our first visible point to the first one that is not before our last visible point, if our trace was
-  // smooth the last time that we simplified it, if its points haven't changed since we last built its path, if our
-  // path level of detail has a level that keeps our trace within our tolerance, and if that means going through fewer
-  // points than our (column) level of detail could select, i.e. four per column (see Note #7 above).
+  // Only go through the points of our path level of detail that cover our visible points (see coveringRange() in
+  // pathLevelOfDetailUtils.ts), if our trace was smooth the last time that we simplified it, if its points haven't
+  // changed since we last built its path, if our path level of detail has a level that keeps our trace within our
+  // tolerance, and if that means going through fewer points than our (column) level of detail could select, i.e. four
+  // per column (see Note #7 above).
 
   const level =
     smoothTraces[seriesIndex - 1] && isUnchanged
@@ -4742,8 +4722,7 @@ const linearPathPoints = (
       : undefined;
 
   if (level) {
-    const levelStart = Math.max(0, lowerBound(level.indices, level.count, start + 1) - 1);
-    const levelEnd = Math.min(level.count, lowerBound(level.indices, level.count, end - 1) + 1);
+    const [levelStart, levelEnd] = pathLevelOfDetailUtils.coveringRange(level, start, end);
 
     if (levelEnd - levelStart <= 4 * nbOfSelectionColumns) {
       return selectionPoints(xValues, yValues, level.indices, levelStart, levelEnd, false);
