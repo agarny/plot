@@ -137,6 +137,14 @@ describe('sanitiseHtml()', () => {
     expect(sanitiseHtml('a<template><b>t</b></template>b')).toBe('ab');
     expect(sanitiseHtml('a<select><option>o</option></select>b')).toBe('ab');
     expect(sanitiseHtml('a<textarea>t</textarea>b')).toBe('ab');
+
+    // Elements that the HTML standard hides (and whose contents browsers parse as text, in the case of noembed and
+    // noframes).
+
+    expect(sanitiseHtml('a<datalist><option>o</option></datalist>b')).toBe('ab');
+    expect(sanitiseHtml('a<noembed><b>n</b></noembed>b')).toBe('ab');
+    expect(sanitiseHtml('a<noframes><b>n</b></noframes>b')).toBe('ab');
+    expect(sanitiseHtml('<ruby>k<rp>(</rp><rt>r</rt><rp>)</rp></ruby>')).toBe('kr');
   });
 
   it('removes comments', () => {
