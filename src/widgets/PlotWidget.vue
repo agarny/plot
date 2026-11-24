@@ -162,6 +162,7 @@ import * as common from '../common/common';
 import * as levelOfDetailUtils from '../common/levelOfDetailUtils';
 import * as pathLevelOfDetailUtils from '../common/pathLevelOfDetailUtils';
 import { SimplifiedPath } from '../common/simplifiedPathUtils';
+import { roundDTick, ticksBetween } from '../common/ticksUtils';
 import {
   type LogValues,
   type ValuesStatistics,
@@ -315,7 +316,6 @@ const Y_AXIS_EXTRA_SIZE = 5; // Extra size of our Y axis, on top of the width of
 const TICK_MIN_X_SPACING = 80; // Target spacing between two consecutive ticks along the X axis.
 const TICK_MIN_Y_SPACING = 40; // Target spacing between two consecutive ticks along the Y axis.
 const TICK_LABEL_MIN_SPACING = 10; // Minimum spacing between two consecutive tick labels.
-const MAX_NB_OF_TICKS = 1000; // A safeguard against an axis needing an unreasonable number of ticks.
 const LINE_WIDTH = 2; // Like Plotly, the width of our traces' lines (in CSS pixels).
 const MARKER_SIZE = 6; // Like Plotly, the size of our markers (in CSS pixels).
 const MARKER_PADDING = Math.max(MARKER_SIZE / 1.6, 3); // Autorange padding for markers (in CSS pixels).
@@ -3704,49 +3704,16 @@ const formatNumber = (value: number, format: NumberFormat): string => {
   return isNegative ? MINUS_SIGN + res : res;
 };
 
-// Ticks, like Plotly, i.e. ticks that are multiples of a "nice" spacing (which depends on the length of our axis).
-// Unlike Plotly, though, we use fewer ticks if their labels would otherwise overlap (Plotly rotates its X tick labels
-// instead and lets its Y tick labels overlap), and we don't have minor ticks (and therefore minor grid lines), so that
-// our grid is lighter.
+// Ticks, like Plotly, i.e. ticks that are multiples of a "nice" spacing, which depends on the length of our axis (see
+// ticksUtils.ts). Unlike Plotly, though, we use fewer ticks if their labels would otherwise overlap (Plotly rotates its
+// X tick labels instead and lets its Y tick labels overlap), and we don't have minor ticks (and therefore minor grid
+// lines), so that our grid is lighter.
 
 interface AxisTicks {
   label: (split: number) => string;
 }
 
 const axisTicks: Partial<Record<AxisKey, AxisTicks>> = {};
-
-const roundDTick = (roughDTick: number): number => {
-  // Round the given rough tick spacing up to the next "nice" value, i.e. 2, 5, or 10 times a power of ten.
-  // Note: our base and value may suffer from floating point errors (e.g., our tick spacing may be 5 * 1e24, i.e.
-  //       4.999999999999999e24, which divided by 1e24 is 4.999999999999999), in which case a "nice" value would get
-  //       rounded up to itself and axisSplits() would loop forever, hence our tolerance. We also make sure that we
-  //       always return a bigger value, even if our tolerance is not enough (e.g., for a subnormal value).
-
-  const base = 10 ** Math.floor(Math.log10(roughDTick));
-  const value = (1 + 1e-9) * (roughDTick / base);
-  const res = base * ([2, 5, 10, 20].find((niceValue: number) => niceValue > value) ?? 20);
-
-  return res > roughDTick ? res : 2 * roughDTick;
-};
-
-const ticksBetween = (min: number, max: number, dtick: number): number[] => {
-  // Return the multiples of the given tick spacing that are between the given minimum and maximum values.
-  // Note #1: we round our ticks to 14 significant digits, so that they don't suffer from floating point errors (e.g.,
-  //          0.30000000000000004 rather than 0.3).
-  // Note #2: we count our ticks rather than increment our tick index since the latter may not change if it is big
-  //          enough (e.g., with a tiny range far away from zero), in which case we would end up in an endless loop.
-
-  const res: number[] = [];
-  const tolerance = 1e-9 * dtick;
-  const first = Math.ceil((min - tolerance) / dtick);
-  const nbOfTicks = Math.min(Math.floor((max + tolerance) / dtick) - first + 1, MAX_NB_OF_TICKS);
-
-  for (let i = 0; i < nbOfTicks; ++i) {
-    res.push(Number.parseFloat(((first + i) * dtick).toPrecision(14)));
-  }
-
-  return res;
-};
 
 const logTickLabel = (value: number): string => {
   // Return the label of the given tick of a logarithmic axis, i.e. of a (multiple of a) power of ten, with only the
