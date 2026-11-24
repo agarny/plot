@@ -161,6 +161,7 @@ import { createChunkedPath, MAX_PATH_POINTS } from '../common/chunkedPathUtils';
 import * as common from '../common/common';
 import * as levelOfDetailUtils from '../common/levelOfDetailUtils';
 import * as pathLevelOfDetailUtils from '../common/pathLevelOfDetailUtils';
+import { isValidRange, pinchedRange, type Range, scaledRange } from '../common/rangeUtils';
 import { SimplifiedPath } from '../common/simplifiedPathUtils';
 import { roundDTick, ticksBetween } from '../common/ticksUtils';
 import {
@@ -1823,7 +1824,6 @@ const exportToCsv = async (): Promise<void> => {
 //       series and phase plots.
 
 type AxisKey = 'x' | 'y';
-type Range = [number, number];
 
 const seriesData = (u: uPlot, seriesIndex: number): [Float64Array, Float64Array] | undefined => {
   // Return the X and Y values of the given series.
@@ -2276,12 +2276,11 @@ const finishRangeAnimation = (): void => {
 };
 
 const zoomTo = (ranges: Partial<Record<AxisKey, Range>>, duration: number = 0): void => {
-  // Zoom into the given ranges, animating our zoom over the given duration, but only if they are all valid (e.g., not
-  // if we zoomed in so much that the two ends of a range are the same number, or out so much that the length of a range
-  // is not a finite number anymore, in which case we couldn't map our values to pixels or zoom back in).
+  // Zoom into the given ranges, animating our zoom over the given duration, but only if they are all valid (see
+  // isValidRange()).
 
   for (const range of Object.values(ranges)) {
-    if (!(range[0] < range[1]) || !Number.isFinite(range[1] - range[0])) {
+    if (!isValidRange(range)) {
       return;
     }
   }
@@ -2317,7 +2316,7 @@ const zoomBy = (
     if (range && target) {
       const center = range[0] + (range[1] - range[0]) * (centerFractions[axisKey] ?? 0.5);
 
-      ranges[axisKey] = [center + factor * (target[0] - center), center + factor * (target[1] - center)];
+      ranges[axisKey] = scaledRange(target, center, factor);
     }
   }
 
@@ -3095,17 +3094,6 @@ const movePinch = (pinch: Pinch, event: PointerEvent, rect: PlotRect): void => {
       }
     });
   }
-};
-
-const pinchedRange = (range: Range, startFraction: number, fraction: number, factor: number): Range => {
-  // Return the given range, scaled by the given factor, so that the value that was at the given start fraction of the
-  // given range is now at the given fraction of the new range.
-
-  const value = range[0] + (range[1] - range[0]) * startFraction;
-  const length = (range[1] - range[0]) * factor;
-  const min = value - length * fraction;
-
-  return [min, min + length];
 };
 
 const applyPinch = (pinch: Pinch): void => {
