@@ -8,10 +8,21 @@ Key characteristics:
 - It does not rely on any UI framework (e.g., [PrimeVue](https://primevue.org/)) or CSS framework (e.g., [Tailwind CSS](https://tailwindcss.com/)).
 
 Contents:
-- [Installation](#installation)
-- [Usage](#usage): [Types](#types), [Data](#data), [Large and live data](#large-and-live-data), [Props](#props), [Events](#events), [Methods](#methods), [Interaction](#interaction), and [Theming](#theming)
-- [Development](#development): [Benchmarking](#benchmarking) and [Releasing](#releasing)
-- [License](#license)
+- [OpenCOR Plot](#opencor-plot)
+  - [Installation](#installation)
+  - [Usage](#usage)
+    - [Types](#types)
+    - [Data](#data)
+    - [Large and live data](#large-and-live-data)
+    - [Props](#props)
+    - [Events](#events)
+    - [Methods](#methods)
+    - [Interaction](#interaction)
+    - [Theming](#theming)
+  - [Development](#development)
+    - [Benchmarking](#benchmarking)
+    - [Releasing](#releasing)
+  - [License](#license)
 
 ## Installation
 
@@ -157,8 +168,8 @@ Available through a template ref:
 |---|---|
 | `resetMargins()` | Emit [`marginsUpdated`](#events) again, e.g. after the shared margins have been reset. |
 | `contextMenuHidden()` | Tell the plot that a custom context menu (see [`contextMenu`](#events)) has been hidden, so that it can get the keyboard focus back. |
-| `pointCounts()` | The number of points of the visible traces (`nbOfPoints`), and how many of them were last drawn (`nbOfDrawnPoints`), as an [`PlotPointCounts`](#types). Meant for testing and benchmarking. |
-| `memoryUsage()` | The memory (in bytes) used by the component itself, not counting the data, as an [`PlotMemoryUsage`](#types): by its levels of detail (`levelOfDetail`) and by the logarithm of its values along logarithmic axes (`logValues`). Meant for testing and benchmarking. |
+| `pointCounts()` | The number of points of the visible traces (`nbOfPoints`), and how many of them were last drawn (`nbOfDrawnPoints`), as a [`PlotPointCounts`](#types). Meant for testing and benchmarking. |
+| `memoryUsage()` | The memory (in bytes) used by the component itself, not counting the data, as a [`PlotMemoryUsage`](#types): by its levels of detail (`levelOfDetail`) and by the logarithm of its values along logarithmic axes (`logValues`). Meant for testing and benchmarking. |
 
 ### Interaction
 
@@ -211,7 +222,7 @@ bun format:check     # Check the code formatting (without fixing it).
 bun lint             # Lint the code.
 bun lint:check       # Lint the code (without fixing it).
 bun test             # Run the tests.
-bun test --coverage  # Run the tests with code coverage (which must be 100%).
+bun test --coverage  # Run the tests with code coverage.
 bun test --watch     # Run the tests in watch mode.
 bun typecheck        # Type check the code.
 bun clean            # Remove all generated files.

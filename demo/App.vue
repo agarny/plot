@@ -556,7 +556,7 @@ const updateDrawingStatus = (): void => {
   }
 
   if (liveFrameId) {
-    liveStatus.value = `${formatNumber(liveNbOfPoints)} of ${formatNumber(liveTotalNbOfPoints)} per trace`;
+    liveStatus.value = `${formatNumber(Math.max(0, liveNbOfPoints))} of ${formatNumber(liveTotalNbOfPoints)} per trace`;
   }
 
   plottedPoints.value = formatNumber(nbOfPoints);
@@ -602,7 +602,7 @@ vue.onBeforeUnmount(() => {
 //    full range and they don't end up showing an empty area), and we then pan them along their X axis, towards one end
 //    of their data and then towards the other, over and over. Without any zoom, all of our points are visible, so we
 //    pan our instances by up to half of their X range either way (i.e. so that up to half of their plotting area ends
-//    up being empty); and
+//    up being empty);
 //  - live: we plot our data as if it was being generated (see Live updating above), from no points to all of them in
 //    BENCHMARK_LIVE_FRAMES frames, over and over, with a fixed X range (like a simulation that is plotted for its whole
 //    duration). This means that every frame, our instances get a few more points (i.e. a continuation of their
@@ -610,8 +610,10 @@ vue.onBeforeUnmount(() => {
 //  - resize: we shrink our instances (i.e. our grid of instances) to BENCHMARK_MIN_RESIZE_SCALE of their width and
 //    height, and then grow them back, in BENCHMARK_RESIZE_FRAMES frames, over and over (like when resizing a window).
 //    This means that every frame, our instances get laid out and drawn again.
-// Note #1: our frame rate is capped by the refresh rate of the display (e.g., 60 FPS), so the time it takes our
-//          instances to redraw themselves is what tells us how much headroom we have.
+// Note #1: our frame rate is normally capped by the refresh rate of the display (e.g., 60 FPS), in which case the time
+//          it takes our instances to redraw themselves is what tells us how much headroom we have (our benchmark
+//          script, however, may run our benchmark in a browser whose frame rate is not capped, see
+//          scripts/benchmark.ts).
 // Note #2: our instances redraw themselves in their requestAnimationFrame() callbacks, which they request when they
 //          get zoomed, panned, or updated (or when they get resized, once the browser has laid out our frame). So,
 //          every frame, we zoom, pan, or update them from a requestAnimationFrame() callback (onFrameEnd()) that we
@@ -705,7 +707,7 @@ const sendKeyPress = (key: string): void => {
 
 const runInteraction = (interact: (frame: number) => void): Promise<BenchmarkResult | undefined> => {
   // Run the given interaction every frame for BENCHMARK_DURATION, and return our frame rate and the redraw time of our
-  // instances, or nothing if our benchmark got stopped (see Note #2 above).
+  // instances (see Note #2 above), or nothing if our benchmark got stopped.
 
   const run = benchmarkRun;
 
@@ -888,6 +890,9 @@ const runBenchmark = async (): Promise<void> => {
 
   // Plot our data live, with a fixed X range, stopping our own live updating, if any, while we do so, and then showing
   // our data as it was before (i.e. all at once or live).
+  // Note: when showing all of our data again, we don't measure our time to first draw (i.e. we don't use showData()),
+  //       since our instances already exist and only get the rest of their data (i.e. a continuation of their data,
+  //       see traceValues.ts), i.e. our time to first draw would otherwise be much shorter than it really is.
 
   benchmarkInteraction.value = 'live';
 
@@ -910,7 +915,12 @@ const runBenchmark = async (): Promise<void> => {
   });
 
   if (!isStopped()) {
-    showData();
+    if (live.value) {
+      startLive();
+    } else {
+      datasets.value = generatedDatasets;
+      liveRunning.value = false;
+    }
   }
 
   if (!record('live', liveResult)) {

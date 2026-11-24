@@ -64,8 +64,8 @@ Options:
   --browsers <names>     Browsers to use: ${BROWSERS.join(', ')} (default: all of them, Safari only on macOS,
                          skipping those that cannot be launched)
   --scenarios <ids>      Scenarios to run (default: all of them, see --list)
-  --capped              Cap the frame rate of Chrome and Firefox to the refresh rate of the display
-  --headed               Show Chrome (Firefox and Safari are always shown, see Note #4 above)
+  --capped               Cap the frame rate of Chrome and Firefox to the refresh rate of the display
+  --headed               Show Chrome (Firefox and Safari are always shown)
   --chrome-path <path>   Path to Chrome (default: the installed stable version of Chrome)
   --firefox-path <path>  Path to Firefox (default: the usual location of Firefox on this platform)
   --output <directory>   Where to save our report (default: benchmark-results)

@@ -4,8 +4,8 @@ import type { PlotData, PlotTrace } from '../index';
 //  - smooth: sine waves, i.e. what level of detail must draw faithfully;
 //  - noisy: sine waves with some noise, i.e. the worst case for drawing many points;
 //  - steps: staircases, i.e. near-vertical edges;
-//  - gaps: sine waves with some non-finite values, i.e. gaps that must be drawn as such (and which prevent level of
-//    detail from being used for the visible points that contain them);
+//  - gaps: sine waves with some non-finite values, i.e. gaps that must be drawn as such (including by our level of
+//    detail, which must therefore also select the first point of each gap);
 //  - unsorted: Lissajous curves, i.e. X values that are not sorted (so neither the culling of invisible points nor
 //    the column level of detail can be used, but the path level of detail can);
 //  - unsortedNoisy: Lissajous curves with some noise, i.e. the worst case for drawing many unsorted points (since
