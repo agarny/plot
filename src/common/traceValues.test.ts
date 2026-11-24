@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 
 import { randomGenerator } from '../../test.utils';
-import { type ValuesStatistics, isContinuationOf, logValues, valuesStatistics } from './traceValues';
+import { isContinuationOf, type LogValues, logValues, type ValuesStatistics, valuesStatistics } from './traceValues';
 
 // Some helpers.
 
@@ -264,5 +264,59 @@ describe('logValues()', () => {
     expect(other.buffer).not.toBe(previous.buffer);
     expect(Array.from(other.values)).toEqual([0, 1, 2, 3]);
     expect(isContinuationOf(other.values, previous.values)).toBe(false);
+  });
+
+  it('gives the same results incrementally as from scratch, as do the statistics of its results', () => {
+    // Simulate some live data that is a view of a bigger (e.g., shared) buffer, i.e. a buffer that gets appended to (by
+    // a random number of values at a time) and which last value gets retrieved again (and may therefore change), and
+    // check that, at each step, our logarithm (and its statistics) is the same as that of the same values processed
+    // from scratch, and that our buffer never has room for more than what is left of the buffer of our values.
+
+    const random = randomGenerator(456);
+    const SPECIAL_VALUES = [0, -1, Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY];
+
+    for (let run = 0; run < 50; ++run) {
+      const NB_OF_VALUES = 200;
+      const OFFSET = run % 3;
+      const buffer = new Float64Array(OFFSET + NB_OF_VALUES);
+      const randomValue = (): number => {
+        const r = random();
+
+        return r < 0.05 ? (SPECIAL_VALUES[Math.floor(5 * random())] as number) : 10 ** (20 * r - 10);
+      };
+      let length = 0;
+      let previous: LogValues | undefined;
+      let previousStatistics: ValuesStatistics | undefined;
+
+      while (length < NB_OF_VALUES) {
+        if (length > 0 && random() < 0.5) {
+          buffer[OFFSET + length - 1] = randomValue();
+        }
+
+        const newLength = Math.min(NB_OF_VALUES, length + 1 + Math.floor(10 * random()));
+
+        for (let i = length; i < newLength; ++i) {
+          buffer[OFFSET + i] = randomValue();
+        }
+
+        length = newLength;
+
+        const values = view(buffer, length, OFFSET);
+        const incremental = logValues(values, previous);
+        const fromScratch = logValues(Float64Array.from(values));
+        const incrementalStatistics = valuesStatistics(incremental.values, previousStatistics);
+        const fromScratchStatistics = valuesStatistics(fromScratch.values);
+
+        expect(Array.from(incremental.values)).toEqual(Array.from(fromScratch.values));
+        expect(incremental.buffer.length).toBeLessThanOrEqual(NB_OF_VALUES);
+        expect({ min: incrementalStatistics.min, max: incrementalStatistics.max }).toEqual({
+          min: fromScratchStatistics.min,
+          max: fromScratchStatistics.max
+        });
+
+        previous = incremental;
+        previousStatistics = incrementalStatistics;
+      }
+    }
   });
 });
