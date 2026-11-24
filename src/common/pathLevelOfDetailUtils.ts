@@ -43,7 +43,7 @@
 //          snapshot of its state just before our last point (since it is normally the first point that may have
 //          changed), from which it resumes if it can. This means that updating a level with N new points costs O(N)
 //          rather than O(size of the trace), while the first update of a level (e.g., once zoomed in) costs O(size of
-//          the trace).
+//          the trace), which can be done bit by bit (see Note #9).
 // Note #6: our values are relative to an origin (i.e. the first finite point of our trace), so that they keep as much
 //          precision as possible (e.g., if they have a large offset). If the range of our values gets bigger than our
 //          sizes (e.g., while a simulation is running), then we rebuild our levels for all of our points, which only
@@ -63,6 +63,12 @@
 //          continuation of them (see traceValues.ts), we start again from scratch, and otherwise only from our last
 //          point (which may have changed), unless they are the very same values (i.e. the same arrays), which we assume
 //          haven't changed (e.g., when a plot gets redrawn without its data having changed).
+// Note #9: taking the points of a trace into account (see update()) and updating a level (see updatedLevel()) both cost
+//          O(number of points), e.g. about 0.1 s for a trace of 10,000,000 points, which is too long to be done while
+//          drawing a plot. So, they can also be done bit by bit (see buildLevel()), e.g. in the background. Our ranges
+//          then cover the points that we have taken into account so far, but we only get our sizes (and therefore our
+//          levels) once we have taken all of our points into account, and a level that has processed some of our points
+//          resumes from its snapshot, like when our trace gets new points (see Note #5).
 
 import { isContinuationOf } from './traceValues';
 
@@ -180,9 +186,10 @@ const reset = (lod: PathLevelOfDetail): void => {
 export const invalidate = (lod: PathLevelOfDetail, from: number): void => {
   // Invalidate the given level of detail from the given point onwards (i.e. those points may have changed), resetting
   // it if all of its points may have changed (so that we get new sizes and that our levels don't keep any of our
-  // previous points, e.g. if we now have no points).
+  // previous points, e.g. if we now have no points), or if it doesn't have sizes yet (so that our ranges and origin,
+  // which we get our sizes from, don't come from points that may have changed, see Note #9 above).
 
-  if (from <= 0) {
+  if (from <= 0 || lod.xSize === 0) {
     reset(lod);
   } else {
     lod.count = Math.min(lod.count, from);
@@ -208,33 +215,10 @@ const size = (min: number, max: number): number => {
   return res;
 };
 
-const rebuild = (lod: PathLevelOfDetail, xValues: Float64Array, yValues: Float64Array, count: number): void => {
-  // Rebuild our sizes for the given points, and reset our levels (see Note #6 above).
+const build = (lod: PathLevelOfDetail): void => {
+  // Build our sizes for our ranges, and create our levels (see Note #6 above), unless we don't have any finite point.
 
-  reset(lod);
-
-  let hasFinitePoint = false;
-
-  for (let i = 0; i < count; ++i) {
-    const x = xValues[i] as number;
-    const y = yValues[i] as number;
-
-    if (x - x === 0 && y - y === 0) {
-      if (!hasFinitePoint) {
-        hasFinitePoint = true;
-
-        lod.xOrigin = x;
-        lod.yOrigin = y;
-      }
-
-      lod.xMin = Math.min(lod.xMin, x);
-      lod.xMax = Math.max(lod.xMax, x);
-      lod.yMin = Math.min(lod.yMin, y);
-      lod.yMax = Math.max(lod.yMax, y);
-    }
-  }
-
-  if (!hasFinitePoint) {
+  if (lod.xMin > lod.xMax) {
     return;
   }
 
@@ -317,13 +301,15 @@ const appendIndex = (level: PathLevel, index: number): void => {
   level.indices[level.count++] = index;
 };
 
-export const update = (lod: PathLevelOfDetail, xValues: Float64Array, yValues: Float64Array, count: number): void => {
-  // Take the given points into account, from the first one that may have changed since we were last updated (see Note
-  // #8 above), or that we haven't taken into account (see invalidate()), i.e. make sure that our sizes are big enough
-  // for them, and rebuild our levels otherwise (see Note #6 above).
-  // Note #1: our levels themselves only get updated when they are needed (see Note #5 above and updatedLevel()).
-  // Note #2: the given number of points must not be smaller than the one we were last updated with for the same values
-  //          (e.g., it is the length of the given values), since we would then keep our points beyond it.
+const scan = (
+  lod: PathLevelOfDetail,
+  xValues: Float64Array,
+  yValues: Float64Array,
+  count: number,
+  maxNbOfPoints: number
+): number => {
+  // Take up to the given number of the given points into account (see update()), and return how many points we went
+  // through (which, if our sizes need rebuilding, includes the points that we went through before rebuilding them).
 
   if (xValues !== lod.xValues || yValues !== lod.yValues) {
     invalidate(
@@ -335,21 +321,26 @@ export const update = (lod: PathLevelOfDetail, xValues: Float64Array, yValues: F
   lod.xValues = xValues;
   lod.yValues = yValues;
 
-  if (lod.count >= count) {
-    return;
-  }
+  let res = 0;
 
-  if (lod.xSize === 0) {
-    rebuild(lod, xValues, yValues, count);
-  } else {
+  while (lod.count < count && res < maxNbOfPoints) {
+    // Extend our ranges with our next points, making our first finite point our origin (see Note #6 above).
+
+    const start = lod.count;
+    const end = Math.min(count, start + (maxNbOfPoints - res));
     let { xMin, xMax, yMin, yMax } = lod;
 
-    for (let i = lod.count; i < count; ++i) {
+    for (let i = start; i < end; ++i) {
       const x = xValues[i] as number;
       const y = yValues[i] as number;
 
       if (x - x === 0 && y - y === 0) {
         if (x < xMin) {
+          if (xMin === Number.POSITIVE_INFINITY) {
+            lod.xOrigin = x;
+            lod.yOrigin = y;
+          }
+
           xMin = x;
         }
 
@@ -367,17 +358,41 @@ export const update = (lod: PathLevelOfDetail, xValues: Float64Array, yValues: F
       }
     }
 
-    if (xMax - xMin > lod.xSize || yMax - yMin > lod.ySize) {
-      rebuild(lod, xValues, yValues, count);
-    } else {
-      lod.xMin = xMin;
-      lod.xMax = xMax;
-      lod.yMin = yMin;
-      lod.yMax = yMax;
+    res += end - start;
+
+    lod.count = end;
+    lod.xMin = xMin;
+    lod.xMax = xMax;
+    lod.yMin = yMin;
+    lod.yMax = yMax;
+
+    // Start again from scratch if our ranges have got bigger than our sizes, so that we rebuild our sizes (and
+    // therefore our levels) for all of our points (see Note #6 above).
+
+    if (lod.xSize !== 0 && (xMax - xMin > lod.xSize || yMax - yMin > lod.ySize)) {
+      reset(lod);
     }
   }
 
-  lod.count = count;
+  // Build our sizes (and therefore our levels) once we have taken all of our points into account, if we don't have them
+  // yet (see Note #9 above).
+
+  if (lod.xSize === 0 && lod.count >= count) {
+    build(lod);
+  }
+
+  return res;
+};
+
+export const update = (lod: PathLevelOfDetail, xValues: Float64Array, yValues: Float64Array, count: number): void => {
+  // Take the given points into account, from the first one that may have changed since we were last updated (see Note
+  // #8 above), or that we haven't taken into account (see invalidate()), i.e. make sure that our sizes are big enough
+  // for them, and rebuild our levels otherwise (see Note #6 above).
+  // Note #1: our levels themselves only get updated when they are needed (see Note #5 above and updatedLevel()).
+  // Note #2: the given number of points must not be smaller than the one we were last updated with for the same values
+  //          (e.g., it is the length of the given values), since we would then keep our points beyond it.
+
+  scan(lod, xValues, yValues, count, Number.POSITIVE_INFINITY);
 };
 
 const processLevel = (
@@ -385,15 +400,17 @@ const processLevel = (
   level: PathLevel,
   xValues: Float64Array,
   yValues: Float64Array,
-  maxCount: number
+  maxCount: number,
+  maxNbOfPoints: number
 ): boolean => {
-  // Process the points of our trace that the given level hasn't processed (see Note #5 above), and return whether the
-  // level has no more than the given number of points, stopping as soon as it has more (since it then gets dropped, see
-  // updatedLevel()).
+  // Process (up to the given number of) the points of our trace that the given level hasn't processed (see Note #5 and
+  // Note #9 above), and return whether the level has no more than the given number of points, stopping as soon as it
+  // has more (since it then gets dropped, see processedLevel()).
+  // Note: the points that we process again (i.e. from our snapshot or from our anchor, see below) don't count towards
+  //       the given number of points, so that we always process at least one new point.
   // Note: our state (see PathLevelState for what it means) is kept in local variables rather than in a PathLevelState
   //       object while we process our points, so that JavaScript engines can keep it in registers.
 
-  const count = lod.count;
   const xOrigin = lod.xOrigin;
   const yOrigin = lod.yOrigin;
   const xScale = 4 ** level.level / lod.xSize; // Inverse of our X tolerance, which is exact since our sizes are powers
@@ -453,12 +470,13 @@ const processLevel = (
     start = anchor + 1;
   }
 
-  // Process our points.
+  // Process our points, taking a snapshot of our level just before the last one (so that we can resume from there,
+  // whether we have processed all of our points or only some of them).
 
-  for (let i = start; i < count; ++i) {
-    // Take a snapshot of our level just before our last point.
+  const end = Math.min(lod.count, level.processedCount + maxNbOfPoints);
 
-    if (i === count - 1) {
+  for (let i = start; i < end; ++i) {
+    if (i === end - 1) {
       level.snapshotIndex = i;
       level.snapshotCount = level.count;
 
@@ -605,7 +623,7 @@ const processLevel = (
     level.openEnd = true;
   }
 
-  level.processedCount = count;
+  level.processedCount = end;
 
   return level.count <= maxCount;
 };
@@ -621,29 +639,55 @@ export const updatedLevel = (
 
   const level = lod.levels[levelNumber];
 
-  if (!level) {
-    return undefined;
-  }
-
-  // Update our level, if needed, and drop it, as well as our finer levels, if it hardly reduces the number of points of
-  // our trace (see Note #7 above).
-
-  if (
-    level.processedCount < lod.count &&
-    !processLevel(
-      lod,
-      level,
-      xValues,
-      yValues,
-      lod.count >= MIN_NB_OF_POINTS_TO_DROP_LEVELS ? MAX_LEVEL_RATIO * lod.count : Number.POSITIVE_INFINITY
-    )
-  ) {
-    lod.levels.length = levelNumber;
-
+  if (!level || (level.processedCount < lod.count && !processedLevel(lod, level, xValues, yValues))) {
     return undefined;
   }
 
   return level;
+};
+
+const processedLevel = (
+  lod: PathLevelOfDetail,
+  level: PathLevel,
+  xValues: Float64Array,
+  yValues: Float64Array,
+  maxNbOfPoints: number = Number.POSITIVE_INFINITY
+): boolean => {
+  // Process (up to the given number of) the points of our trace that the given level hasn't processed (see
+  // processLevel()), and drop it, as well as our finer levels, if it hardly reduces the number of points of our trace
+  // (see Note #7 above), and return whether we still have it.
+
+  if (
+    processLevel(
+      lod,
+      level,
+      xValues,
+      yValues,
+      lod.count >= MIN_NB_OF_POINTS_TO_DROP_LEVELS ? MAX_LEVEL_RATIO * lod.count : Number.POSITIVE_INFINITY,
+      maxNbOfPoints
+    )
+  ) {
+    return true;
+  }
+
+  lod.levels.length = level.level;
+
+  return false;
+};
+
+const levelNumber = (lod: PathLevelOfDetail, maxXTolerance: number, maxYTolerance: number): number => {
+  // Return the number of our coarsest level whose tolerances are no bigger than the given ones (whether or not we have
+  // that level), or -1 if we don't have sizes or if the given tolerances are not valid.
+
+  if (lod.xSize === 0 || !(maxXTolerance > 0) || !(maxYTolerance > 0)) {
+    return -1;
+  }
+
+  return Math.max(
+    0,
+    Math.ceil(0.5 * Math.log2(lod.xSize / maxXTolerance)),
+    Math.ceil(0.5 * Math.log2(lod.ySize / maxYTolerance))
+  );
 };
 
 export const selectLevel = (
@@ -657,17 +701,44 @@ export const selectLevel = (
   // if any (otherwise, all of the points of our trace should be used).
   // Note: our level of detail must have taken all of the points of our trace into account (see update()).
 
-  if (lod.xSize === 0 || !(maxXTolerance > 0) || !(maxYTolerance > 0)) {
-    return undefined;
+  const level = levelNumber(lod, maxXTolerance, maxYTolerance);
+
+  return level === -1 ? undefined : updatedLevel(lod, xValues, yValues, level);
+};
+
+export const buildLevel = (
+  lod: PathLevelOfDetail,
+  xValues: Float64Array,
+  yValues: Float64Array,
+  count: number,
+  maxXTolerance: number,
+  maxYTolerance: number,
+  maxNbOfPoints: number
+): boolean => {
+  // Do up to the given number of points of the work that selectLevel() would need for the given points and tolerances,
+  // i.e. take those points into account (see update()) and then update the level that it would return (see
+  // updatedLevel()), and return whether that work is all done, i.e. whether selectLevel() wouldn't need to do anything
+  // anymore (see Note #9 above).
+  // Note: the given number of points must not be smaller than the one we were last updated with for the same values
+  //       (see update()).
+
+  const nbOfPoints = scan(lod, xValues, yValues, count, maxNbOfPoints);
+
+  if (lod.count < count) {
+    return false;
   }
 
-  const level = Math.max(
-    0,
-    Math.ceil(0.5 * Math.log2(lod.xSize / maxXTolerance)),
-    Math.ceil(0.5 * Math.log2(lod.ySize / maxYTolerance))
-  );
+  const level = lod.levels[levelNumber(lod, maxXTolerance, maxYTolerance)];
 
-  return updatedLevel(lod, xValues, yValues, level);
+  if (!level || level.processedCount >= lod.count) {
+    return true;
+  }
+
+  if (nbOfPoints >= maxNbOfPoints) {
+    return false;
+  }
+
+  return !processedLevel(lod, level, xValues, yValues, maxNbOfPoints - nbOfPoints) || level.processedCount >= lod.count;
 };
 
 const lowerBound = (indices: Int32Array, count: number, index: number): number => {

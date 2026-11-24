@@ -4500,10 +4500,19 @@ const linearPath = (
 //          while it costs some time (e.g., about 0.2 ms per noisy trace in Chrome), so we only simplify it every so
 //          often, so that we still find out whether it has become smooth (e.g., once zoomed in, see TraceSmoothness in
 //          simplifiedPathUtils.ts).
+// Note #9: the level of our path level of detail that we need (see Note #7) costs O(number of points) to build the
+//          first time (see Note #5 and Note #9 of pathLevelOfDetailUtils.ts), e.g. about 0.1 s for a trace of
+//          10,000,000 points, i.e. about 1 s for ten such traces, which would freeze our plot (e.g., the first time
+//          that we pan it, or when zooming in needs a finer level). So, we build it in the background, bit by bit (see
+//          buildPathLevels()), and keep using our (column) level of detail until it is built. We stop building it if
+//          the points of our trace change in the meantime (e.g., while a simulation is running), since we would only
+//          use it once our trace gets drawn again with the same points.
 
 const PATH_LOD_TOLERANCE = 0.25; // In canvas pixels, i.e. our traces are off by at most about 0.35 canvas pixels.
 const SIMPLIFIED_PATH_TOLERANCE = 0.25; // In canvas pixels.
 const SMOOTH_TRACE_RATIO = 0.25; // See Note #7 above.
+const PATH_LEVEL_BUILD_POINTS = 65536; // Number of points that we go through at a time to build a path level.
+const PATH_LEVEL_BUILD_TIME = 4; // Time (in milliseconds) after which we let the browser do something else (Note #9).
 
 interface LinearPathPoints {
   xValues: Float64Array; // X values of the points to give to linearPath().
@@ -4551,22 +4560,22 @@ const updatedTraceLod = (
   return lod;
 };
 
-const updatedPathLod = (
-  traceIndex: number,
-  xValues: Float64Array,
-  yValues: Float64Array,
-  count: number
-): pathLevelOfDetailUtils.PathLevelOfDetail => {
-  // Return the path level of detail of the given trace (creating it if needed), once updated for the given points (see
-  // Note #5 above).
+const pathLod = (traceIndex: number): pathLevelOfDetailUtils.PathLevelOfDetail => {
+  // Return the path level of detail of the given trace, creating it if needed.
 
   pathLods[traceIndex] ??= pathLevelOfDetailUtils.create();
 
-  const lod = pathLods[traceIndex];
+  return pathLods[traceIndex];
+};
 
-  pathLevelOfDetailUtils.update(lod, xValues, yValues, count);
+const pathLevelTolerances = (area: PathArea): [x: number, y: number] => {
+  // Return the tolerances (in X and Y values) of the level of our path level of detail that we need for the given
+  // plotting area (see Note #5 above).
 
-  return lod;
+  return [
+    (PATH_LOD_TOLERANCE * (area.xMax - area.xMin)) / area.width,
+    (PATH_LOD_TOLERANCE * (area.yMax - area.yMin)) / area.height
+  ];
 };
 
 const selectedPathLevel = (
@@ -4577,15 +4586,121 @@ const selectedPathLevel = (
   area: PathArea
 ): pathLevelOfDetailUtils.PathLevel | undefined => {
   // Return the level of our path level of detail that keeps the given trace within our tolerance of what it would
-  // otherwise look like in the given plotting area, if any (see Note #5 above).
+  // otherwise look like in the given plotting area, if any (see Note #5 above), building it if needed.
 
-  return pathLevelOfDetailUtils.selectLevel(
-    updatedPathLod(traceIndex, xValues, yValues, count),
-    xValues,
-    yValues,
-    (PATH_LOD_TOLERANCE * (area.xMax - area.xMin)) / area.width,
-    (PATH_LOD_TOLERANCE * (area.yMax - area.yMin)) / area.height
-  );
+  const lod = pathLod(traceIndex);
+  const [xTolerance, yTolerance] = pathLevelTolerances(area);
+
+  pathLevelOfDetailUtils.update(lod, xValues, yValues, count);
+
+  return pathLevelOfDetailUtils.selectLevel(lod, xValues, yValues, xTolerance, yTolerance);
+};
+
+// The path levels that we are building in the background, by trace (see Note #9 above).
+
+interface PathLevelBuild {
+  xValues: Float64Array; // X values of our trace.
+  yValues: Float64Array; // Y values of our trace.
+  count: number; // Number of points of our trace.
+  xTolerance: number; // Tolerances of the level that we need (see pathLevelTolerances()).
+  yTolerance: number;
+}
+
+const pathLevelBuilds = new Map<number, PathLevelBuild>();
+let pathLevelBuildsTimeoutId: ReturnType<typeof setTimeout> | undefined;
+
+const builtPathLevel = (
+  traceIndex: number,
+  xValues: Float64Array,
+  yValues: Float64Array,
+  count: number,
+  area: PathArea
+): pathLevelOfDetailUtils.PathLevel | undefined => {
+  // Return the level of our path level of detail that keeps the given trace within our tolerance of what it would
+  // otherwise look like in the given plotting area, if any and if it is built, and otherwise have it built in the
+  // background (see Note #9 above).
+
+  const lod = pathLod(traceIndex);
+  const [xTolerance, yTolerance] = pathLevelTolerances(area);
+
+  if (pathLevelOfDetailUtils.buildLevel(lod, xValues, yValues, count, xTolerance, yTolerance, 0)) {
+    return pathLevelOfDetailUtils.selectLevel(lod, xValues, yValues, xTolerance, yTolerance);
+  }
+
+  pathLevelBuilds.set(traceIndex, { xValues, yValues, count, xTolerance, yTolerance });
+
+  pathLevelBuildsTimeoutId ??= setTimeout(buildPathLevels, common.NO_DELAY);
+
+  return undefined;
+};
+
+const buildPathLevels = (): void => {
+  // Build, bit by bit, the path levels that our traces need (see Note #9 above) for up to PATH_LEVEL_BUILD_TIME
+  // milliseconds, and then let the browser do something else (e.g., draw a frame) before carrying on, if needed.
+
+  pathLevelBuildsTimeoutId = undefined;
+
+  const deadline = performance.now() + PATH_LEVEL_BUILD_TIME;
+
+  for (const [traceIndex, build] of pathLevelBuilds) {
+    if (performance.now() >= deadline) {
+      break;
+    }
+
+    // Stop building the path level of a trace which points have changed since we were asked to build it (or which
+    // doesn't get drawn using our level of detail anymore), since we only need it if our trace gets drawn again with
+    // the same points (in which case we will be asked to build it again, see linearPathPoints()).
+
+    const points = tracePoints[traceIndex];
+
+    if (
+      !props.levelOfDetail ||
+      points?.xValues !== build.xValues ||
+      points.yValues !== build.yValues ||
+      points.count !== build.count
+    ) {
+      pathLevelBuilds.delete(traceIndex);
+
+      continue;
+    }
+
+    // Build our path level until it is built or until we have to let the browser do something else.
+
+    const lod = pathLod(traceIndex);
+    let isBuilt = false;
+
+    do {
+      isBuilt = pathLevelOfDetailUtils.buildLevel(
+        lod,
+        build.xValues,
+        build.yValues,
+        build.count,
+        build.xTolerance,
+        build.yTolerance,
+        PATH_LEVEL_BUILD_POINTS
+      );
+    } while (!isBuilt && performance.now() < deadline);
+
+    if (isBuilt) {
+      pathLevelBuilds.delete(traceIndex);
+    }
+  }
+
+  if (pathLevelBuilds.size > 0) {
+    pathLevelBuildsTimeoutId = setTimeout(buildPathLevels, common.NO_DELAY);
+  }
+};
+
+const stopBuildingPathLevels = (): void => {
+  // Stop building our path levels in the background, if we are.
+
+  if (pathLevelBuildsTimeoutId !== undefined) {
+    clearTimeout(pathLevelBuildsTimeoutId);
+
+    pathLevelBuildsTimeoutId = undefined;
+  }
+
+  pathLevelBuilds.clear();
 };
 
 let selectionXValues = new Float64Array(0);
@@ -4704,12 +4819,12 @@ const linearPathPoints = (
   // Only go through the points of our path level of detail that cover our visible points (see coveringRange() in
   // pathLevelOfDetailUtils.ts), if our trace was smooth the last time that we simplified it, if its points haven't
   // changed since we last built its path, if our path level of detail has a level that keeps our trace within our
-  // tolerance, and if that means going through fewer points than our (column) level of detail could select, i.e. four
-  // per column (see Note #7 above).
+  // tolerance (and it is built, see Note #9 above), and if that means going through fewer points than our (column)
+  // level of detail could select, i.e. four per column (see Note #7 above).
 
   const level =
     traceSmoothnesses[seriesIndex - 1]?.isSmooth() && isUnchanged
-      ? selectedPathLevel(seriesIndex - 1, xValues, yValues, count, area)
+      ? builtPathLevel(seriesIndex - 1, xValues, yValues, count, area)
       : undefined;
 
   if (level) {
@@ -5856,6 +5971,10 @@ vue.onBeforeUnmount(() => {
   stopRangeAnimation();
 
   closeRangeEditor(false);
+
+  // Stop building our path levels (and forget about the data that they are for).
+
+  stopBuildingPathLevels();
 
   // Destroy our plot, if any.
 

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'bun:test';
 
 import { isFinitePoint, randomGenerator } from '../../test.utils';
 import {
+  buildLevel,
   coveringRange,
   create,
   type PathLevelOfDetail,
@@ -727,6 +728,174 @@ describe('selectLevel()', () => {
 
     expect(selectLevel(lod, xValues, yValues, 0.25, 8)?.level).toBe(1);
     expect(selectLevel(lod, xValues, yValues, 0.2, 8)).toBeUndefined();
+  });
+});
+
+// buildLevel().
+
+describe('buildLevel()', () => {
+  const buildBitByBit = (
+    lod: PathLevelOfDetail,
+    xValues: Float64Array,
+    yValues: Float64Array,
+    tolerances: [x: number, y: number],
+    maxNbOfPoints: number,
+    count: number = xValues.length
+  ): number => {
+    // Build, bit by bit, the level that selectLevel() would return for the given points and tolerances, and return the
+    // number of times that we called buildLevel().
+
+    let res = 1;
+
+    while (!buildLevel(lod, xValues, yValues, count, tolerances[0], tolerances[1], maxNbOfPoints)) {
+      ++res;
+    }
+
+    return res;
+  };
+
+  const selectedIndices = (
+    lod: PathLevelOfDetail,
+    xValues: Float64Array,
+    yValues: Float64Array,
+    tolerances: [x: number, y: number]
+  ): number[] | undefined => {
+    // Return the indices of the points of the level that selectLevel() returns for the given tolerances, if any.
+
+    const pathLevel = selectLevel(lod, xValues, yValues, tolerances[0], tolerances[1]);
+
+    return pathLevel && Array.from(pathLevel.indices.subarray(0, pathLevel.count));
+  };
+
+  it('builds bit by bit what selectLevel() would otherwise build in one go', () => {
+    // Some smooth and noisy traces, with and without gaps, for which we build a coarse level (which reduces their
+    // number of points) and a fine level (which hardly reduces it, so it gets dropped, see Note #7 of
+    // pathLevelOfDetailUtils.ts).
+
+    const random = randomGenerator(246);
+    const nbOfPoints = MIN_NB_OF_POINTS_TO_DROP_LEVELS + 1000;
+
+    for (const [xValues, yValues] of [
+      curve(nbOfPoints),
+      randomWalk(random, nbOfPoints, false),
+      randomWalk(random, nbOfPoints, true)
+    ]) {
+      const freshLod = levelOfDetail(xValues, yValues);
+
+      for (const scale of [2 ** -4, 2 ** -18]) {
+        const tolerances: [number, number] = [scale * freshLod.xSize, scale * freshLod.ySize];
+        const indices = selectedIndices(freshLod, xValues, yValues, tolerances);
+
+        for (const maxNbOfPoints of [1, 7, 1000, nbOfPoints]) {
+          const lod = create();
+          const nbOfCalls = buildBitByBit(lod, xValues, yValues, tolerances, maxNbOfPoints);
+
+          // We went through our points (once to take them into account, and once to update our level, unless it got
+          // dropped) up to the given number of them at a time.
+
+          expect(nbOfCalls).toBeGreaterThanOrEqual(Math.ceil(nbOfPoints / maxNbOfPoints));
+          expect(nbOfCalls).toBeLessThanOrEqual(Math.ceil((2 * nbOfPoints) / maxNbOfPoints) + 1);
+
+          // There is nothing left to do, and we get the same level (or none) as if it had been built in one go.
+
+          expect(buildLevel(lod, xValues, yValues, nbOfPoints, tolerances[0], tolerances[1], 0)).toBe(true);
+          expect([lod.xOrigin, lod.yOrigin, lod.xSize, lod.ySize]).toEqual([
+            freshLod.xOrigin,
+            freshLod.yOrigin,
+            freshLod.xSize,
+            freshLod.ySize
+          ]);
+          expect(selectedIndices(lod, xValues, yValues, tolerances)).toEqual(indices);
+        }
+      }
+    }
+  });
+
+  it('does nothing without a number of points to go through, unless there is nothing to do', () => {
+    const [xValues, yValues] = curve(1000);
+    const lod = create();
+
+    expect(buildLevel(lod, xValues, yValues, 1000, 0.01, 0.01, 0)).toBe(false);
+    expect(lod.count).toBe(0);
+
+    update(lod, xValues, yValues, 1000);
+
+    expect(buildLevel(lod, xValues, yValues, 1000, 0.01, 0.01, 0)).toBe(false);
+    expect(lod.levels.every((level) => level.processedCount === 0)).toBe(true);
+
+    // There is nothing to do if the given tolerances are not valid, or if we don't have the level that we would need.
+
+    expect(buildLevel(lod, xValues, yValues, 1000, 0, 0.01, 0)).toBe(true);
+    expect(buildLevel(lod, xValues, yValues, 1000, 2 ** -30, 0.01, 0)).toBe(true);
+
+    // Nor if we don't have any finite point.
+
+    const [noXValues, noYValues] = points([
+      [Number.NaN, 0],
+      [0, Number.NaN]
+    ]);
+
+    expect(buildLevel(create(), noXValues, noYValues, 2, 1, 1, 2)).toBe(true);
+  });
+
+  it('carries on with new points, rebuilding its sizes if needed, and starts again with new values', () => {
+    // A random walk which range grows, so that our sizes get rebuilt while we take its new points into account bit by
+    // bit (see Note #6 of pathLevelOfDetailUtils.ts), and another random walk.
+
+    const random = randomGenerator(579);
+    const [xValues, yValues] = randomWalk(random, 20000, true);
+    const [otherXValues, otherYValues] = randomWalk(random, 20000, true);
+    const tolerances: [number, number] = [1e-3, 1e-3];
+    const lod = create();
+
+    buildBitByBit(lod, xValues, yValues, tolerances, 100, 1000);
+
+    const xSize = lod.xSize;
+
+    buildBitByBit(lod, xValues, yValues, tolerances, 100);
+
+    expect(lod.xSize).toBeGreaterThan(xSize);
+    expect(selectedIndices(lod, xValues, yValues, tolerances)).toEqual(
+      selectedIndices(levelOfDetail(xValues, yValues), xValues, yValues, tolerances)
+    );
+
+    // Some other values, which we start building, before going back to our first values.
+
+    expect(buildLevel(lod, otherXValues, otherYValues, 20000, tolerances[0], tolerances[1], 100)).toBe(false);
+
+    buildBitByBit(lod, xValues, yValues, tolerances, 100);
+
+    expect(selectedIndices(lod, xValues, yValues, tolerances)).toEqual(
+      selectedIndices(levelOfDetail(xValues, yValues), xValues, yValues, tolerances)
+    );
+  });
+
+  it('starts again from scratch if some of its points may have changed before it has its sizes', () => {
+    // Some points which first finite point (i.e. our origin, see Note #6 of pathLevelOfDetailUtils.ts) changes after we
+    // have taken it into account, but before we have taken all of our points into account.
+
+    const [xValues, yValues] = curve(1000);
+    const lod = create();
+
+    xValues[0] = Number.NaN;
+
+    expect(buildLevel(lod, xValues, yValues, 1000, 0.01, 0.01, 10)).toBe(false);
+    expect(lod.xOrigin).toBe(xValues[1] as number);
+
+    xValues[1] = 5;
+
+    invalidate(lod, 1);
+
+    expect(lod.count).toBe(0);
+
+    buildBitByBit(lod, xValues, yValues, [0.01, 0.01], 10);
+
+    const freshLod = levelOfDetail(xValues, yValues);
+
+    expect([lod.xOrigin, lod.xMax, lod.xSize]).toEqual([5, 5, freshLod.xSize]);
+    expect(selectedIndices(lod, xValues, yValues, [0.01, 0.01])).toEqual(
+      selectedIndices(freshLod, xValues, yValues, [0.01, 0.01])
+    );
   });
 });
 
