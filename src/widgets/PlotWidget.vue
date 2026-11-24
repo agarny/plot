@@ -4535,10 +4535,12 @@ const linearPath = (
 //          the points of our path level of detail that cover our visible points, if it has a level for our tolerance.
 //          We don't do this for a trace that is not smooth (e.g., noisy data), since our path level of detail would
 //          cost O(number of points) to find out that it can't reduce it (and again whenever its levels get rebuilt,
-//          e.g., while a simulation is running). Neither do we do this for a trace that has new points (e.g., while a
-//          simulation is running), since our path level of detail would then have to process them (and be rebuilt
-//          whenever the range of its values gets bigger), while our (column) level of detail only selects the points
-//          of the columns that they are in (see Note #6 of levelOfDetailUtils.ts).
+//          e.g., while a simulation is running). Neither do we do this for a trace whose points have changed since we
+//          last built its path (other than its last point, see traceValues.ts), i.e. that has new points (e.g., while
+//          a simulation is running) or new values (e.g., when plotting new data with the same number of points), since
+//          our path level of detail would then have to process them (and be rebuilt for new values, or whenever the
+//          range of its values gets bigger), while our (column) level of detail only selects the points of the columns
+//          that they are in (see Note #6 of levelOfDetailUtils.ts).
 // Note #8: simplifying the path of a trace that is not smooth (e.g., noisy data) hardly reduces its number of segments
 //          while it costs some time (e.g., about 0.2 ms per noisy trace in Chrome), so we only simplify the path of a
 //          trace that was not smooth the last time that we simplified it once every SMOOTHNESS_CHECK_INTERVAL times
@@ -4562,7 +4564,14 @@ const traceLods: levelOfDetailUtils.LevelOfDetail[] = [];
 const pathLods: pathLevelOfDetailUtils.PathLevelOfDetail[] = [];
 const smoothTraces: boolean[] = []; // Whether our traces were smooth the last time that we simplified their path.
 const unsimplifiedPaths: number[] = []; // Number of paths built since then for our traces that were not smooth.
-const traceCounts: number[] = []; // Number of points of our traces the last time that we built their path.
+
+interface TracePoints {
+  xValues: Float64Array; // X values of our trace.
+  yValues: Float64Array; // Y values of our trace.
+  count: number; // Number of points of our trace.
+}
+
+const tracePoints: TracePoints[] = []; // Points of our traces the last time that we built their path.
 
 const simplifyPath = (traceIndex: number): boolean => {
   // Return whether we should simplify the path that we are about to build for the given trace (see Note #8 above).
@@ -4710,12 +4719,17 @@ const linearPathPoints = (
     simplify: props.levelOfDetail && simplifyPath(seriesIndex - 1)
   };
   const count = Math.min(xValues.length, yValues.length);
-  const isUnchanged = traceCounts[seriesIndex - 1] === count;
+  const previousPoints = tracePoints[seriesIndex - 1];
+  const isUnchanged =
+    previousPoints !== undefined &&
+    previousPoints.count === count &&
+    isContinuationOf(xValues, previousPoints.xValues) &&
+    isContinuationOf(yValues, previousPoints.yValues);
   const nbOfColumns = Math.ceil(area.width) + 1;
   const minNbOfPoints = levelOfDetailUtils.MIN_POINTS_PER_COLUMN * nbOfColumns;
   const xFactor = area.width / (area.xMax - area.xMin);
 
-  traceCounts[seriesIndex - 1] = count;
+  tracePoints[seriesIndex - 1] = { xValues, yValues, count };
 
   if (!props.levelOfDetail || count <= minNbOfPoints || !(xFactor > 0) || !Number.isFinite(xFactor)) {
     return res;
@@ -4763,9 +4777,9 @@ const linearPathPoints = (
 
   // Only go through the points of our path level of detail that cover our visible points, i.e. from the last one that
   // is not after our first visible point to the first one that is not before our last visible point, if our trace was
-  // smooth the last time that we simplified it, if its number of points hasn't changed since we last built its path,
-  // if our path level of detail has a level that keeps our trace within our tolerance, and if that means going through
-  // fewer points than our (column) level of detail could select, i.e. four per column (see Note #7 above).
+  // smooth the last time that we simplified it, if its points haven't changed since we last built its path, if our
+  // path level of detail has a level that keeps our trace within our tolerance, and if that means going through fewer
+  // points than our (column) level of detail could select, i.e. four per column (see Note #7 above).
 
   const level =
     smoothTraces[seriesIndex - 1] && isUnchanged
@@ -4979,7 +4993,7 @@ const forgetRemovedTraces = (nbOfTraces: number): void => {
   // reference to our old data).
   // Note: this gets called whenever our data gets updated (see plotData()).
 
-  for (const array of [pathLods, traceLods, smoothTraces, unsimplifiedPaths, traceCounts, hoverSearches, drawnPoints]) {
+  for (const array of [pathLods, traceLods, smoothTraces, unsimplifiedPaths, tracePoints, hoverSearches, drawnPoints]) {
     if (array.length > nbOfTraces) {
       array.length = nbOfTraces;
     }
