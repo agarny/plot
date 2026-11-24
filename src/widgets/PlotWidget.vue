@@ -162,7 +162,7 @@ import * as common from '../common/common';
 import * as levelOfDetailUtils from '../common/levelOfDetailUtils';
 import * as pathLevelOfDetailUtils from '../common/pathLevelOfDetailUtils';
 import { isValidRange, pinchedRange, type Range, scaledRange } from '../common/rangeUtils';
-import { SimplifiedPath } from '../common/simplifiedPathUtils';
+import { SimplifiedPath, TraceSmoothness } from '../common/simplifiedPathUtils';
 import { roundDTick, ticksBetween } from '../common/ticksUtils';
 import {
   type LogValues,
@@ -4497,15 +4497,13 @@ const linearPath = (
 //          range of its values gets bigger), while our (column) level of detail only selects the points of the columns
 //          that they are in (see Note #6 of levelOfDetailUtils.ts).
 // Note #8: simplifying the path of a trace that is not smooth (e.g., noisy data) hardly reduces its number of segments
-//          while it costs some time (e.g., about 0.2 ms per noisy trace in Chrome), so we only simplify the path of a
-//          trace that was not smooth the last time that we simplified it once every SMOOTHNESS_CHECK_INTERVAL times
-//          that we build it, so that we still find out whether it has become smooth (e.g., once zoomed in). Even then,
-//          we stop simplifying it as soon as we know that it is not smooth (see Note #5 of simplifiedPathUtils.ts).
+//          while it costs some time (e.g., about 0.2 ms per noisy trace in Chrome), so we only simplify it every so
+//          often, so that we still find out whether it has become smooth (e.g., once zoomed in, see TraceSmoothness in
+//          simplifiedPathUtils.ts).
 
 const PATH_LOD_TOLERANCE = 0.25; // In canvas pixels, i.e. our traces are off by at most about 0.35 canvas pixels.
 const SIMPLIFIED_PATH_TOLERANCE = 0.25; // In canvas pixels.
 const SMOOTH_TRACE_RATIO = 0.25; // See Note #7 above.
-const SMOOTHNESS_CHECK_INTERVAL = 16; // See Note #8 above.
 
 interface LinearPathPoints {
   xValues: Float64Array; // X values of the points to give to linearPath().
@@ -4517,8 +4515,7 @@ interface LinearPathPoints {
 
 const traceLods: levelOfDetailUtils.LevelOfDetail[] = [];
 const pathLods: pathLevelOfDetailUtils.PathLevelOfDetail[] = [];
-const smoothTraces: boolean[] = []; // Whether our traces were smooth the last time that we simplified their path.
-const unsimplifiedPaths: number[] = []; // Number of paths built since then for our traces that were not smooth.
+const traceSmoothnesses: TraceSmoothness[] = []; // Smoothness of our traces (see Note #7 and Note #8 above).
 
 interface TracePoints {
   xValues: Float64Array; // X values of our trace.
@@ -4528,18 +4525,12 @@ interface TracePoints {
 
 const tracePoints: TracePoints[] = []; // Points of our traces the last time that we built their path.
 
-const simplifyPath = (traceIndex: number): boolean => {
-  // Return whether we should simplify the path that we are about to build for the given trace (see Note #8 above).
+const traceSmoothness = (traceIndex: number): TraceSmoothness => {
+  // Return the smoothness of the given trace, creating it if needed.
 
-  if (smoothTraces[traceIndex] !== false) {
-    return true;
-  }
+  traceSmoothnesses[traceIndex] ??= new TraceSmoothness();
 
-  const nbOfUnsimplifiedPaths = ((unsimplifiedPaths[traceIndex] ?? 0) + 1) % SMOOTHNESS_CHECK_INTERVAL;
-
-  unsimplifiedPaths[traceIndex] = nbOfUnsimplifiedPaths;
-
-  return nbOfUnsimplifiedPaths === 0;
+  return traceSmoothnesses[traceIndex];
 };
 
 const updatedTraceLod = (
@@ -4651,7 +4642,7 @@ const linearPathPoints = (
     yValues,
     index0,
     index1,
-    simplify: props.levelOfDetail && simplifyPath(seriesIndex - 1)
+    simplify: props.levelOfDetail && traceSmoothness(seriesIndex - 1).simplifiesNextPath()
   };
   const count = Math.min(xValues.length, yValues.length);
   const previousPoints = tracePoints[seriesIndex - 1];
@@ -4717,7 +4708,7 @@ const linearPathPoints = (
   // per column (see Note #7 above).
 
   const level =
-    smoothTraces[seriesIndex - 1] && isUnchanged
+    traceSmoothnesses[seriesIndex - 1]?.isSmooth() && isUnchanged
       ? selectedPathLevel(seriesIndex - 1, xValues, yValues, count, area)
       : undefined;
 
@@ -4854,12 +4845,9 @@ const linearPaths: uPlot.Series.PathBuilder = (u: uPlot, seriesIndex: number, in
 
     simplifiedPath.end();
 
-    // Keep track of whether our trace is smooth (see Note #7 and Note #8 of our level of detail), unless we didn't give
-    // any point to our simplified path (e.g., if our trace cannot be seen), in which case we can't tell.
+    // Keep track of whether our trace is smooth (see Note #7 and Note #8 of our level of detail).
 
-    if (points.simplify && simplifiedPath.nbOfGivenPoints > 0) {
-      smoothTraces[seriesIndex - 1] = simplifiedPath.reducedTo(SMOOTH_TRACE_RATIO);
-    }
+    traceSmoothness(seriesIndex - 1).update(simplifiedPath, SMOOTH_TRACE_RATIO);
 
     strokes = stroke instanceof Path2D ? [stroke] : stroke.paths;
     nbOfStrokedPaths += strokes.length;
@@ -4927,7 +4915,7 @@ const forgetRemovedTraces = (nbOfTraces: number): void => {
   // reference to our old data).
   // Note: this gets called whenever our data gets updated (see plotData()).
 
-  for (const array of [pathLods, traceLods, smoothTraces, unsimplifiedPaths, tracePoints, hoverSearches, drawnPoints]) {
+  for (const array of [pathLods, traceLods, traceSmoothnesses, tracePoints, hoverSearches, drawnPoints]) {
     if (array.length > nbOfTraces) {
       array.length = nbOfTraces;
     }

@@ -3,7 +3,7 @@ import { describe, expect, it } from 'bun:test';
 import { randomGenerator } from '../../test.utils';
 
 import type { ChunkablePath } from './chunkedPathUtils';
-import { SimplifiedPath } from './simplifiedPathUtils';
+import { SimplifiedPath, SMOOTHNESS_CHECK_INTERVAL, TraceSmoothness } from './simplifiedPathUtils';
 
 // Some helpers.
 
@@ -368,5 +368,106 @@ describe('SimplifiedPath', () => {
 
       expectWithinTolerance(commands, simplifiedCommands(commands, tolerance), tolerance);
     }
+  });
+});
+
+// TraceSmoothness.
+
+describe('TraceSmoothness', () => {
+  const SMOOTH_TRACE_RATIO = 0.25;
+  const zigZag: Command[] = Array.from({ length: 100 }, (_value, i) => [i ? 'L' : 'M', i, 10 * (i % 2)]);
+
+  const simplifiedPath = (commands: Command[], tolerance: number = 0.25): SimplifiedPath => {
+    // Return a simplified path (with the given tolerance) to which the given commands have been added.
+
+    const res = new SimplifiedPath(recordedPath(), tolerance, SMOOTH_TRACE_RATIO * commands.length);
+
+    for (const [command, x, y] of commands) {
+      if (command === 'M') {
+        res.moveTo(x, y);
+      } else {
+        res.lineTo(x, y);
+      }
+    }
+
+    res.end();
+
+    return res;
+  };
+
+  const simplifications = (smoothness: TraceSmoothness, nbOfPaths: number): boolean[] => {
+    // Return whether each of the given number of paths that are about to be built for our trace should be simplified.
+
+    return Array.from({ length: nbOfPaths }, () => smoothness.simplifiesNextPath());
+  };
+
+  it('simplifies the paths of a trace until it knows whether it is smooth', () => {
+    const smoothness = new TraceSmoothness();
+
+    expect(smoothness.isSmooth()).toBe(false);
+    expect(simplifications(smoothness, 3 * SMOOTHNESS_CHECK_INTERVAL)).not.toContain(false);
+  });
+
+  it('simplifies all the paths of a smooth trace', () => {
+    const smoothness = new TraceSmoothness();
+
+    smoothness.update(simplifiedPath(circle(1000, 100)), SMOOTH_TRACE_RATIO);
+
+    expect(smoothness.isSmooth()).toBe(true);
+    expect(simplifications(smoothness, 3 * SMOOTHNESS_CHECK_INTERVAL)).not.toContain(false);
+  });
+
+  it('only simplifies one path of a trace that is not smooth every SMOOTHNESS_CHECK_INTERVAL paths', () => {
+    const smoothness = new TraceSmoothness();
+
+    smoothness.update(simplifiedPath(zigZag), SMOOTH_TRACE_RATIO);
+
+    expect(smoothness.isSmooth()).toBe(false);
+
+    for (let i = 0; i < 3; ++i) {
+      const expected = Array.from(
+        { length: SMOOTHNESS_CHECK_INTERVAL },
+        (_value, j) => j === SMOOTHNESS_CHECK_INTERVAL - 1
+      );
+
+      expect(simplifications(smoothness, SMOOTHNESS_CHECK_INTERVAL)).toEqual(expected);
+    }
+  });
+
+  it('finds out when a trace that was not smooth becomes smooth, and vice versa', () => {
+    const smoothness = new TraceSmoothness();
+
+    smoothness.update(simplifiedPath(zigZag), SMOOTH_TRACE_RATIO);
+
+    expect(simplifications(smoothness, SMOOTHNESS_CHECK_INTERVAL).at(-1)).toBe(true);
+
+    smoothness.update(simplifiedPath(circle(1000, 100)), SMOOTH_TRACE_RATIO);
+
+    expect(smoothness.isSmooth()).toBe(true);
+    expect(simplifications(smoothness, SMOOTHNESS_CHECK_INTERVAL)).not.toContain(false);
+
+    smoothness.update(simplifiedPath(zigZag), SMOOTH_TRACE_RATIO);
+
+    expect(smoothness.isSmooth()).toBe(false);
+    expect(simplifications(smoothness, SMOOTHNESS_CHECK_INTERVAL)).toContain(false);
+  });
+
+  it('keeps its smoothness if a path was given no points to simplify', () => {
+    // Note: a path that doesn't simplify our trace (i.e. with a tolerance of zero) or that is given no points (e.g., if
+    //       our trace cannot be seen) can't tell whether our trace is smooth.
+
+    const smoothness = new TraceSmoothness();
+
+    smoothness.update(simplifiedPath(circle(1000, 100)), SMOOTH_TRACE_RATIO);
+    smoothness.update(simplifiedPath(zigZag, 0), SMOOTH_TRACE_RATIO);
+    smoothness.update(simplifiedPath([]), SMOOTH_TRACE_RATIO);
+
+    expect(smoothness.isSmooth()).toBe(true);
+
+    smoothness.update(simplifiedPath(zigZag), SMOOTH_TRACE_RATIO);
+    smoothness.update(simplifiedPath(circle(1000, 100), 0), SMOOTH_TRACE_RATIO);
+    smoothness.update(simplifiedPath([]), SMOOTH_TRACE_RATIO);
+
+    expect(smoothness.isSmooth()).toBe(false);
   });
 });

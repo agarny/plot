@@ -216,3 +216,48 @@ export class SimplifiedPath implements ChunkablePath {
     this.hasSegment = false;
   }
 }
+
+// The smoothness of a trace, i.e. whether its path was worth simplifying the last time that we simplified it (see Note
+// #7 of our level of detail in PlotWidget.vue).
+// Note: simplifying the path of a trace that is not smooth (e.g., noisy data) hardly reduces its number of segments
+//       while it costs some time, so we only simplify the path of a trace that was not smooth once every
+//       SMOOTHNESS_CHECK_INTERVAL times that it gets built, so that we still find out whether it has become smooth
+//       (e.g., once zoomed in). Even then, we stop simplifying it as soon as we know that it is not smooth (see Note #5
+//       above).
+
+export const SMOOTHNESS_CHECK_INTERVAL = 16;
+
+export class TraceSmoothness {
+  private smooth: boolean | undefined; // Whether our trace was smooth when we last simplified its path, if ever.
+  private nbOfUnsimplifiedPaths = 0; // Number of paths that were built for our trace since then, if it was not smooth.
+
+  isSmooth(): boolean {
+    // Return whether our trace was smooth the last time that we simplified its path.
+
+    return this.smooth === true;
+  }
+
+  simplifiesNextPath(): boolean {
+    // Return whether the path that is about to be built for our trace should be simplified, i.e. unless our trace was
+    // not smooth, in which case only once every SMOOTHNESS_CHECK_INTERVAL times (see Note above).
+
+    if (this.smooth !== false) {
+      return true;
+    }
+
+    this.nbOfUnsimplifiedPaths = (this.nbOfUnsimplifiedPaths + 1) % SMOOTHNESS_CHECK_INTERVAL;
+
+    return this.nbOfUnsimplifiedPaths === 0;
+  }
+
+  update(path: SimplifiedPath, maxRatio: number): void {
+    // Keep track of whether our trace is smooth, i.e. whether the given (ended) simplified path of our trace reduced
+    // the points that it was given to the given fraction of them (see reducedTo()), unless it wasn't given any points
+    // while simplifying (e.g., if it didn't simplify our trace or if our trace cannot be seen), in which case we can't
+    // tell.
+
+    if (path.nbOfGivenPoints > 0) {
+      this.smooth = path.reducedTo(maxRatio);
+    }
+  }
+}
