@@ -1867,7 +1867,7 @@ const anyMarkers = (u: uPlot): boolean => {
 
 const finiteDataRange = (u: uPlot, axisKey: AxisKey, seriesIndex?: number): Range | undefined => {
   // Determine the range of the (finite) values of our visible traces (or of the given trace) for the given axis, using
-  // the statistics of their values (see plotData()).
+  // the statistics of their values (see plotValues()).
 
   const firstIndex = seriesIndex ?? 1;
   const lastIndex = seriesIndex ?? u.series.length - 1;
@@ -1988,10 +1988,10 @@ const naturalRange = (u: uPlot, axisKey: AxisKey): Range => {
   }
 
   // No range was given, so we use the range of our data.
-  // Note: we determine the range of our data ourselves, from the statistics of our values (see plotData()), rather than
-  //       let uPlot determine it (see the auto property of our series in createPlot()). Indeed, uPlot would go through
-  //       all of our values whenever our data gets updated, and its range may not be finite (e.g., if a trace starts
-  //       with a NaN value, uPlot never moves away from it, or if it has an infinite value).
+  // Note: we determine the range of our data ourselves, from the statistics of our values (see plotValues()), rather
+  //       than let uPlot determine it (see the auto property of our series in createPlot()). Indeed, uPlot would go
+  //       through all of our values whenever our data gets updated, and its range may not be finite (e.g., if a trace
+  //       starts with a NaN value, uPlot never moves away from it, or if it has an infinite value).
 
   const finiteRange = finiteDataRange(u, axisKey);
 
@@ -2277,10 +2277,11 @@ const finishRangeAnimation = (): void => {
 
 const zoomTo = (ranges: Partial<Record<AxisKey, Range>>, duration: number = 0): void => {
   // Zoom into the given ranges, animating our zoom over the given duration, but only if they are all valid (e.g., not
-  // if we zoomed in so much that the two ends of a range are the same number).
+  // if we zoomed in so much that the two ends of a range are the same number, or out so much that the length of a range
+  // is not a finite number anymore, in which case we couldn't map our values to pixels or zoom back in).
 
   for (const range of Object.values(ranges)) {
-    if (!Number.isFinite(range[0]) || !Number.isFinite(range[1]) || range[0] >= range[1]) {
+    if (!(range[0] < range[1]) || !Number.isFinite(range[1] - range[0])) {
       return;
     }
   }
@@ -3292,7 +3293,6 @@ const closeRangeEditor = (apply: boolean): void => {
   }
 
   // Determine the text and value of our range editor, if it is valid.
-
   // Note: the value is an actual value, so we convert it to the value that we plot (see plotValue()), which may not be
   //       valid (e.g., a non-positive value for a logarithmic axis).
 
@@ -3717,11 +3717,16 @@ const axisTicks: Partial<Record<AxisKey, AxisTicks>> = {};
 
 const roundDTick = (roughDTick: number): number => {
   // Round the given rough tick spacing up to the next "nice" value, i.e. 2, 5, or 10 times a power of ten.
+  // Note: our base and value may suffer from floating point errors (e.g., our tick spacing may be 5 * 1e24, i.e.
+  //       4.999999999999999e24, which divided by 1e24 is 4.999999999999999), in which case a "nice" value would get
+  //       rounded up to itself and axisSplits() would loop forever, hence our tolerance. We also make sure that we
+  //       always return a bigger value, even if our tolerance is not enough (e.g., for a subnormal value).
 
   const base = 10 ** Math.floor(Math.log10(roughDTick));
-  const value = roughDTick / base;
+  const value = (1 + 1e-9) * (roughDTick / base);
+  const res = base * ([2, 5, 10, 20].find((niceValue: number) => niceValue > value) ?? 20);
 
-  return base * ([2, 5, 10].find((niceValue: number) => niceValue > value) ?? 10);
+  return res > roughDTick ? res : 2 * roughDTick;
 };
 
 const ticksBetween = (min: number, max: number, dtick: number): number[] => {
@@ -5392,10 +5397,10 @@ const queueHoverUpdate = (): void => {
 // Note: rather than use a logarithmic scale for a logarithmic axis (in which case all our range computations, e.g., to
 //       autorange, zoom, pan, or pinch, would have to be done in logarithmic space), we plot the decimal logarithm of
 //       its values (with a non-positive value becoming NaN, i.e. not being plotted), so that everything remains linear.
-//       So, the range of a logarithmic axis is the decimal logarithm of its actual range, and only what we show (i.e.
-//       our tick labels, hover tooltip, and range editor) needs to be converted to/from actual
-//       values (see actualValue() and plotValue()). Our image exports are of what we plot, so they are fine too, and
-//       our CSV export is of our actual data.
+//       So, the range of a logarithmic axis is the decimal logarithm of its actual range, and only what we are given
+//       (i.e. the ranges of our axes, see naturalRange()) and what we show (i.e. our tick labels, hover tooltip, and
+//       range editor) needs to be converted from/to actual values (see plotValue() and actualValue()). Our image
+//       exports are of what we plot, so they are fine too, and our CSV export is of our actual data.
 
 const plotValue = (axisKey: AxisKey, value: number): number => {
   // Return the value that we plot for the given actual value along the given axis.
@@ -5776,13 +5781,16 @@ const updatePlot = (): void => {
 
   isPlotOutdated = false;
 
-  // Reset our zoom if we are plotting something else.
+  // Reset our zoom and forget our last autoranges (see naturalRange()) if we are plotting something else.
 
   const titles = `${props.data.xAxisTitle ?? ''}::${props.data.yAxisTitle ?? ''}`;
 
   if (titles !== zoomTitles) {
     zoomTitles = titles;
     zoomRanges = {};
+
+    delete lastAutoRanges.x;
+    delete lastAutoRanges.y;
 
     stopRangeAnimation();
   }
