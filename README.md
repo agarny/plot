@@ -178,14 +178,14 @@ Like with [Plotly](https://plotly.com/javascript/):
 - **Plotting area:** drag to zoom (along one axis if the drag is mostly horizontal or vertical), Shift+drag to pan, use the mouse wheel to zoom around the mouse pointer, and double-click to reset the zoom.
 - **Middle of an axis:** drag to pan along that axis, use the mouse wheel to zoom along it, and double-click to reset its zoom.
 - **Ends of an axis and bottom corners:** drag to move an end of the axis, or click an end of the axis to type its value.
-- **Legend:** click a trace to show or hide it, double-click it to only show that trace (or all the traces again), and hover it to highlight its trace. Its context menu (right-click, or Shift+F10 once it has the focus) can also show only that trace (or all the traces again).
+- **Legend:** click a trace to show or hide it, double-click it to only show that trace (or all the traces again), and hover it to highlight its trace. Its context menu (right-click, or Shift+F10 once it has the focus) can also show only that trace (or all the traces again), or show or hide it if it is the only trace.
 - **Touch:** drag with one finger as with a mouse, or use two fingers to zoom and pan.
 - **Keyboard** (once the plot has the focus): `+` and `−` to zoom in and out, `0` to reset the zoom, the arrow keys to pan, and Shift+F10 (or the context menu key) to open the context menu (e.g., to type the value of an end of an axis). Each legend item can also get the focus: Enter or Space shows or hides its trace, and Shift+F10 opens its context menu.
 - **Escape**, or pressing another mouse button, cancels a drag.
 
 Hovering shows the value of each visible trace at the X value under the mouse pointer. For a trace that is not a function of X (e.g., a phase plot), it shows the point closest to the mouse pointer instead.
 
-The context menu can zoom in and out, reset the zoom, edit the range of an axis, make an axis logarithmic, copy the plot to the clipboard, export it as JPEG, PNG, SVG, or WebP, and export its data to CSV. When requested from a legend item, it can also show only that trace (or all the traces again).
+The context menu can zoom in and out, reset the zoom, edit the range of an axis, make an axis logarithmic, copy the plot to the clipboard, export it as JPEG, PNG, SVG, or WebP, and export its data to CSV. When requested from a legend item, it can also show only that trace (or all the traces again), or show or hide it if it is the only trace.
 
 Copied and exported images always use the light colours (white background, dark text), whatever the current theme, since they are typically used in light documents.
 
