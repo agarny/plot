@@ -1147,14 +1147,17 @@ const openRangeEditorLater = (type: AxisEnd): void => {
 
 const legendTraceMenuItem = (index: number): ContextMenuItem => {
   // Return the item that our context menu starts with when it is requested from the given legend item.
-
-  const action = legendTraceAction(traceVisibilities.value, props.data.traces.length, index);
+  // Note: our context menu keeps its items while it is shown, during which our data may get updated (e.g., traces may
+  //       get added or removed), so the action of our item is determined again when our item is chosen, so that it
+  //       applies to the visibility of our traces at that time (if the trace of our legend item still exists).
 
   return {
     icon: 'eye',
-    label: action.label,
+    label: legendTraceAction(traceVisibilities.value, props.data.traces.length, index).label,
     command: () => {
-      setTraceVisibilities(action.visibilities);
+      if (index < props.data.traces.length) {
+        setTraceVisibilities(legendTraceAction(traceVisibilities.value, props.data.traces.length, index).visibilities);
+      }
     }
   };
 };
