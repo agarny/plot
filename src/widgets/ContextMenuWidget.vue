@@ -414,6 +414,9 @@ const onWindowBlurOrResize = (): void => {
 
 const CONTEXT_MENU_SHOW_EVENT = 'opencor-context-menu-show';
 
+let anchorX = 0;
+let anchorY = 0;
+
 const contextMenuId = Symbol('ContextMenuWidget');
 
 const show = async (event: MouseEvent, usingKeyboard: boolean = false): Promise<void> => {
@@ -434,12 +437,15 @@ const show = async (event: MouseEvent, usingKeyboard: boolean = false): Promise<
     window.addEventListener('resize', onWindowBlurOrResize);
   }
 
+  anchorX = event.clientX;
+  anchorY = event.clientY;
+
   const level: Level = {
     items: props.items,
     parentIndex: -1,
     focusedIndex: -1,
-    left: event.clientX,
-    top: event.clientY
+    left: anchorX,
+    top: anchorY
   };
 
   if (usingKeyboard) {
@@ -450,9 +456,92 @@ const show = async (event: MouseEvent, usingKeyboard: boolean = false): Promise<
 
   await vue.nextTick();
 
-  positionLevel(0, event.clientX, event.clientY);
+  positionLevel(0, anchorX, anchorY);
   focusLevel(0);
 };
+
+// Updating of our context menu while it is shown.
+// Note: our items may change while our context menu is shown (e.g., the label of an item may depend on some data that
+//       gets updated in the meantime), in which case we update our levels. Our items may get recreated, so we identify
+//       an item by its label, but only if no other item of its level has the same label, both before and after the
+//       update: the focused item of a level remains focused (even if it has moved) as long as it can be identified, and
+//       so does an open submenu as long as its parent item can be identified and still has a submenu. Otherwise, that
+//       item is no longer focused (so that choosing the focused item can never run another action than the one that was
+//       focused) and that submenu gets closed. We then position our levels again since their size may have changed.
+
+const actionIndexes = (items: ContextMenuItem[], label: string): number[] => {
+  // Return the indexes of the actions with the given label in the given items.
+
+  return items.flatMap((item: ContextMenuItem, index: number) =>
+    !isSeparator(item) && item.label === label ? [index] : []
+  );
+};
+
+const matchingActionIndex = (items: ContextMenuItem[], oldItems: ContextMenuItem[], oldIndex: number): number => {
+  // Return the index, in the given items, of the action that has the same label as the action at the given index in the
+  // given old items, or -1 if there is no such action or if that label is not unique in the given items or old items
+  // (in which case we can't tell which action is which).
+
+  const oldItem = oldItems[oldIndex];
+
+  if (!oldItem || isSeparator(oldItem) || actionIndexes(oldItems, oldItem.label).length !== 1) {
+    return -1;
+  }
+
+  const indexes = actionIndexes(items, oldItem.label);
+
+  return indexes.length === 1 ? (indexes[0] as number) : -1;
+};
+
+const updateLevels = async (items: ContextMenuItem[]): Promise<void> => {
+  if (!levels.value.length) {
+    return;
+  }
+
+  const newLevels: Level[] = [];
+  let levelItems: ContextMenuItem[] = items;
+  let parentIndex = -1;
+
+  for (const [levelIndex, level] of levels.value.entries()) {
+    newLevels.push({
+      ...level,
+      items: levelItems,
+      parentIndex,
+      focusedIndex: matchingActionIndex(levelItems, level.items, level.focusedIndex)
+    });
+
+    const nextLevel = levels.value[levelIndex + 1];
+
+    if (!nextLevel) {
+      break;
+    }
+
+    parentIndex = matchingActionIndex(levelItems, level.items, nextLevel.parentIndex);
+
+    const parentItem: ContextMenuItem | undefined = levelItems[parentIndex];
+
+    if (!parentItem || isSeparator(parentItem) || !parentItem.items) {
+      break;
+    }
+
+    levelItems = parentItem.items;
+  }
+
+  levels.value = newLevels;
+
+  await vue.nextTick();
+
+  newLevels.forEach((_level: Level, levelIndex: number) => {
+    positionLevel(levelIndex, anchorX, anchorY);
+  });
+};
+
+vue.watch(
+  () => props.items,
+  (items: ContextMenuItem[]) => {
+    void updateLevels(items);
+  }
+);
 
 const hide = (): void => {
   if (!levels.value.length) {
@@ -487,7 +576,7 @@ vue.onUnmounted(() => {
   hide();
 });
 
-defineExpose({ show });
+defineExpose({ show, hide });
 </script>
 
 <style scoped>
