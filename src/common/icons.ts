@@ -65,4 +65,5 @@ export const ICONS = {
   ]
 } as const satisfies Record<string, readonly string[]>;
 
+/** The name of an icon (from PrimeIcons, https://primevue.org/icons/). */
 export type IconName = keyof typeof ICONS;

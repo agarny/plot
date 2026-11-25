@@ -177,82 +177,141 @@ import '../assets/theme.css';
 import ContextMenuWidget, { type ContextMenuItem } from './ContextMenuWidget.vue';
 import PlotLivePointsWidget, { type PlotLivePoint } from './PlotLivePointsWidget.vue';
 
+/**
+ * A trace to plot, which can be a function of X (e.g., against time) or not (e.g., a phase plot). A trace with fewer
+ * than 20 points is also drawn with markers.
+ */
 export interface PlotTrace {
+  /**
+   * The name of the trace, as shown in the legend, the hover tooltip, and the CSV export. It can contain a little HTML
+   * (`b`, `br`, `code`, `em`, `i`, `strong`, `sub`, and `sup`). Anything else is removed.
+   */
   name: string;
+  /**
+   * An optional identifier that keeps the visibility of the trace when the data is updated. Otherwise, the trace is
+   * identified by its `name`, `xValue`, `yValue`, and `runLabel` (and, among traces that have the same ones, by their
+   * order), or by its position if it doesn't have a `name`, `xValue`, and `yValue`.
+   */
   traceId?: string;
+  /** What the X values are (e.g., the name of a model variable), used in the CSV export. */
   xValue: string;
+  /**
+   * The X values of the trace. A point with a non-finite X value (e.g., `NaN`) is a gap in the trace. For live data,
+   * see the Large and live data section of the README file.
+   */
   x: Float64Array;
+  /** What the Y values are (e.g., the name of a model variable), used in the CSV export. */
   yValue: string;
+  /**
+   * The Y values of the trace. A point with a non-finite Y value (e.g., `NaN`) is a gap in the trace. For live data,
+   * see the Large and live data section of the README file.
+   */
   y: Float64Array;
+  /** The colour of the trace, as a CSS colour (e.g., `'#1f77b4'`). */
   color: string;
+  /** The optional rank of the trace in the legend (lower ranks first, 1000 by default). */
   legendRank?: number;
+  /** An optional label that tells apart the X column of the trace from those of other runs in the CSV export. */
   runLabel?: string;
 }
 
+/**
+ * The data to plot. It is not watched, so to update it, give the plot a new `PlotData` object (see the Large and live
+ * data section of the README file).
+ */
 export interface PlotData {
+  /** The title of the X axis. It can contain a little HTML (see `PlotTrace.name`). */
   xAxisTitle?: string;
+  /** The title of the Y axis. It can contain a little HTML (see `PlotTrace.name`). */
   yAxisTitle?: string;
+  /** The range of the X axis when the zoom is reset. By default, it fits the data. */
   xAxisRange?: [number, number];
+  /** The range of the Y axis when the zoom is reset. By default, it fits the data. */
   yAxisRange?: [number, number];
+  /** The traces to plot. */
   traces: PlotTrace[];
 }
 
+/**
+ * The left and right margins of a plot, i.e. the space taken by its Y axis and legend. To line up several plots, pass
+ * the largest left and right margins that their `marginsUpdated` events gave to the `margins` prop of each of them.
+ */
 export interface PlotMargins {
+  /** The left margin (in pixels), i.e. the space taken by the Y axis and its title. */
   left: number;
+  /** The right margin (in pixels), i.e. the space taken by the legend. */
   right: number;
 }
 
-// CSV export events, which can be used to show the progress of an export to CSV (see exportToCsv()).
-
+/** The payload of the `csvExport` event when an export to CSV has started. */
 export interface PlotCsvExportStartedEvent {
   type: 'started';
 }
 
+/** The payload of the `csvExport` event when an export to CSV has made some progress. */
 export interface PlotCsvExportProgressEvent {
   type: 'progress';
+  /** How far the export to CSV has got, from 0 to 100 (an integer). */
   percent: number;
 }
 
+/** The payload of the `csvExport` event when an export to CSV has finished. */
 export interface PlotCsvExportFinishedEvent {
   type: 'finished';
+  /** Whether the export to CSV was successful (and the file was downloaded). */
   success: boolean;
 }
 
+/**
+ * The payload of the `csvExport` event, which can be used to show the progress of an export to CSV. Use its `type` to
+ * tell which one it is.
+ */
 export type PlotCsvExportEvent = PlotCsvExportStartedEvent | PlotCsvExportProgressEvent | PlotCsvExportFinishedEvent;
 
-// Our theme, i.e. whether we should use whatever mode the system uses, light mode, or dark mode.
-
+/** The value of the `theme` prop, i.e. whether to use light or dark mode, or whatever the system uses. */
 export type PlotTheme = 'system' | 'light' | 'dark';
 
-// The number of points of our visible traces and the number of them that actually got drawn the last time our plot got
-// drawn, i.e. how much drawing only the points that are needed for our traces to look the same helps (see
-// pointCounts()). This is mainly meant for testing and benchmarking.
-
+/**
+ * The value returned by the `pointCounts()` method, i.e. how much drawing only the points that are needed for the
+ * traces to look the same helps. Mainly meant for testing and benchmarking.
+ */
 export interface PlotPointCounts {
-  nbOfPoints: number; // Number of points of our visible traces.
-  nbOfDrawnPoints: number; // Number of those points that actually got drawn (see pointCounts()).
+  /** The number of points of the visible traces. */
+  nbOfPoints: number;
+  /** The number of those points that got drawn the last time the plot got drawn. */
+  nbOfDrawnPoints: number;
 }
 
-// The number of bytes that we use for our own purposes, i.e. not counting our data (which belongs to our consumer), see
-// memoryUsage(). This is mainly meant for testing and benchmarking.
-
+/**
+ * The value returned by the `memoryUsage()` method, i.e. the memory (in bytes) used by the plot itself, not counting
+ * its data. Mainly meant for testing and benchmarking.
+ */
 export interface PlotMemoryUsage {
-  levelOfDetail: number; // Our levels of detail and the buffers of their selected points.
-  logValues: number; // The decimal logarithm of our values along our logarithmic axes (see plotValues()).
+  /** The memory used by the levels of detail of the traces and the buffers of their selected points. */
+  levelOfDetail: number;
+  /** The memory used by the decimal logarithm of the values along logarithmic axes. */
+  logValues: number;
 }
 
-// Context menu event, which is emitted rather than showing our context menu if we are to use a custom context menu (see
-// customContextMenu), so that it can be shown instead. Its items are those of our context menu (including their state,
-// e.g. whether an axis is logarithmic, and their command, e.g. to zoom in around where our context menu was requested).
-// Note: our context menu can be requested using the keyboard (i.e. Shift+F10 or the context menu key), in which case
-//       our custom context menu should get the keyboard focus, so that it can be used with the keyboard straight away.
-//       Whether our context menu was requested using the mouse or the keyboard, contextMenuHidden() should be called
-//       once our custom context menu has been hidden, so that our plot can get the keyboard focus back, if needed.
-
+/**
+ * The payload of the `contextMenu` event, which is emitted rather than showing our context menu when the
+ * `customContextMenu` prop is set, so that a custom context menu can be shown instead. Once it has been hidden, call
+ * the `contextMenuHidden()` method, so that the plot can get the keyboard focus back, if needed.
+ */
 export interface PlotContextMenuEvent {
+  /** The X coordinate (in client coordinates) where the context menu was requested. */
   clientX: number;
+  /** The Y coordinate (in client coordinates) where the context menu was requested. */
   clientY: number;
+  /**
+   * Whether the context menu was requested using the keyboard (i.e. Shift+F10 or the context menu key), in which case
+   * the custom context menu should get the keyboard focus, so that it can be used with the keyboard straight away.
+   */
   usingKeyboard: boolean;
+  /**
+   * The items of our context menu, including their state (e.g., whether an axis is logarithmic) and their command
+   * (e.g., to zoom in around where the context menu was requested).
+   */
   items: ContextMenuItem[];
 }
 
