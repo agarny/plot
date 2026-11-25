@@ -1138,8 +1138,39 @@ const onLegendKeyDown = (event: KeyboardEvent, index: number): void => {
 //          (see legendTraceAction()).
 // Note #2: our range editor is opened once our context menu has been hidden (and has given the keyboard focus back), so
 //          that it gets (and keeps) the keyboard focus, since it gets closed when it loses it.
+// Note #3: we keep track of the trace of the legend item from which our context menu was requested using its key (see
+//          traceVisibilityKeys()) rather than its index, since our data may get updated while our context menu is
+//          shown, in which case the index of that trace may change (e.g., if a trace that comes before it gets removed)
+//          or that trace may get removed, in which case we hide our context menu (rather than remove the item for that
+//          trace, which would shift our other items and might result in the wrong item being chosen using the
+//          keyboard).
 
-const contextMenuLegendIndex = vue.shallowRef<number | null>(null);
+const contextMenuLegendKey = vue.shallowRef<string | null>(null);
+
+const legendKey = (index: number | undefined): string | null => {
+  // Return the key of the trace of the given legend item, if any.
+
+  return index === undefined ? null : (traceVisibilityKeys(props.data.traces)[index] ?? null);
+};
+
+const legendTraceIndex = (key: string | null): number => {
+  // Return the current index of the trace with the given key, or -1 if there is no such trace (anymore).
+
+  return key === null ? -1 : traceVisibilityKeys(props.data.traces).indexOf(key);
+};
+
+const contextMenuLegendTraceIndex = vue.computed<number>(() => legendTraceIndex(contextMenuLegendKey.value));
+
+vue.watch(contextMenuLegendTraceIndex, (index: number) => {
+  // Hide our context menu if the trace of the legend item from which it was requested has been removed, giving the
+  // keyboard focus back to our plot rather than to that legend item, which may now be the legend item of another trace.
+
+  if (index === -1 && contextMenuLegendKey.value !== null) {
+    contextMenuFocusTarget = null;
+
+    contextMenuRef.value?.hide();
+  }
+});
 
 const openRangeEditorLater = (type: AxisEnd): void => {
   window.setTimeout(() => {
@@ -1147,29 +1178,34 @@ const openRangeEditorLater = (type: AxisEnd): void => {
   });
 };
 
-const legendTraceMenuItem = (index: number): ContextMenuItem => {
-  // Return the item that our context menu starts with when it is requested from the given legend item.
-  // Note: our data may get updated while our context menu is shown (e.g., traces may get added or removed). Our context
-  //       menu then gets our new items (see ContextMenuWidget's updateLevels()), but a custom context menu keeps the
-  //       items that it was given, so the action of our item is determined again when our item is chosen, so that it
-  //       applies to the visibility of our traces at that time (if the trace of our legend item still exists).
+const legendTraceMenuItem = (key: string, index: number): ContextMenuItem => {
+  // Return the item that our context menu starts with when it is requested from the legend item of the trace with the
+  // given key, which is currently at the given index.
+  // Note: our data may get updated while our context menu is shown (see Note #3). Our context menu then gets our new
+  //       items (see ContextMenuWidget's updateLevels()), but a custom context menu keeps the items that it was given,
+  //       so the action of our item is determined again when our item is chosen, so that it applies to our trace (if it
+  //       still exists) and to the visibility of our traces at that time.
 
   return {
     icon: 'eye',
     label: legendTraceAction(traceVisibilities.value, props.data.traces.length, index).label,
     command: () => {
-      if (index < props.data.traces.length) {
-        setTraceVisibilities(legendTraceAction(traceVisibilities.value, props.data.traces.length, index).visibilities);
+      const currentIndex = legendTraceIndex(key);
+
+      if (currentIndex !== -1) {
+        setTraceVisibilities(
+          legendTraceAction(traceVisibilities.value, props.data.traces.length, currentIndex).visibilities
+        );
       }
     }
   };
 };
 
 const contextMenuItems = vue.computed<ContextMenuItem[]>(() => [
-  ...(contextMenuLegendIndex.value === null
+  ...(contextMenuLegendKey.value === null || contextMenuLegendTraceIndex.value === -1
     ? []
     : [
-        legendTraceMenuItem(contextMenuLegendIndex.value),
+        legendTraceMenuItem(contextMenuLegendKey.value, contextMenuLegendTraceIndex.value),
         {
           separator: true as const
         }
@@ -1323,7 +1359,7 @@ const onContextMenu = (event: MouseEvent): void => {
   const legendItemElement =
     event.target instanceof Element ? event.target.closest<HTMLElement>('[data-legend-index]') : null;
 
-  contextMenuLegendIndex.value = legendItemElement ? Number(legendItemElement.dataset.legendIndex) : null;
+  contextMenuLegendKey.value = legendKey(legendItemElement ? Number(legendItemElement.dataset.legendIndex) : undefined);
   contextMenuFocusTarget = legendItemElement;
 
   // Keep track of where our context menu was requested, so that we can zoom in/out around that position (see zoomIn()
@@ -1375,7 +1411,7 @@ const showContextMenuUsingKeyboard = (legendItemElement?: HTMLElement, legendInd
   hover.value = null;
   contextMenuCenterFractions = {};
   contextMenuShownUsingKeyboard = true;
-  contextMenuLegendIndex.value = legendIndex ?? null;
+  contextMenuLegendKey.value = legendKey(legendIndex);
   contextMenuFocusTarget = legendItemElement ?? null;
 
   showContextMenu(

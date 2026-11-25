@@ -542,7 +542,7 @@ vue.onUnmounted(() => {
   hide();
 });
 
-defineExpose({ show });
+defineExpose({ show, hide });
 </script>
 
 <style scoped>
