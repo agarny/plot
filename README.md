@@ -79,11 +79,12 @@ The component is the default export of `@opencor/plot`, and is also exported as 
 | `PlotCsvExportStartedEvent` | `{ type: 'started' }` | An export to CSV has started. |
 | `PlotCsvExportProgressEvent` | `{ type: 'progress'; percent: number }` | An export to CSV has made some progress: `percent` goes from 0 to 100 (an integer). |
 | `PlotCsvExportFinishedEvent` | `{ type: 'finished'; success: boolean }` | An export to CSV has finished, whether successfully (and the file was downloaded) or not. |
+| `PlotImageExportEvent` | `{ action: 'copy' \| 'export'; format: 'jpeg' \| 'png' \| 'svg' \| 'webp'; success: boolean }` | The payload of the [`imageExport`](#events) event: whether the plot was copied to the clipboard (always as PNG) or exported to an image file, in which format, and whether it worked. |
 | `PlotContextMenuEvent` | `{ clientX: number; clientY: number; usingKeyboard: boolean; items: ContextMenuItem[] }` | The payload of the [`contextMenu`](#events) event: where the context menu was requested (in client coordinates), whether it was requested using the keyboard (in which case the custom menu should take the keyboard focus), and the items that our context menu would have shown. |
 | `ContextMenuItem` | `ContextMenuAction \| ContextMenuSeparator` | An item of a context menu. |
 | `ContextMenuAction` | `{ label: string; icon?: IconName; checked?: boolean; command?: () => void; items?: ContextMenuItem[] }` | An action: its `label`, its `icon`, whether it is checked (only for a checkable action, e.g. to make an axis logarithmic), the `command` to call when it is chosen, and its submenu `items`, if any. |
 | `ContextMenuSeparator` | `{ separator: true }` | A separator. |
-| `IconName` | `'angle-right' \| 'arrows-h' \| 'arrows-v' \| 'chart-line' \| 'check' \| 'copy' \| 'download' \| 'image' \| 'refresh' \| 'search-minus' \| 'search-plus'` | The name of an icon (from [PrimeIcons](https://primevue.org/icons/)). |
+| `IconName` | `'angle-right' \| 'arrows-h' \| 'arrows-v' \| 'chart-line' \| 'check' \| 'copy' \| 'download' \| 'eye' \| 'image' \| 'pencil' \| 'refresh' \| 'search-minus' \| 'search-plus'` | The name of an icon (from [PrimeIcons](https://primevue.org/icons/)). |
 | `PlotPointCounts` | `{ nbOfPoints: number; nbOfDrawnPoints: number }` | The value returned by the [`pointCounts()`](#methods) method. |
 | `PlotMemoryUsage` | `{ levelOfDetail: number; logValues: number }` | The value returned by the [`memoryUsage()`](#methods) method. |
 
@@ -157,6 +158,7 @@ To draw traces without our level of detail, use `:levelOfDetail="false"`. Our pa
 |---|---|---|
 | `marginsUpdated` | [`PlotMargins`](#types) | The margins that the plot needs have changed. To line up several plots, pass the largest left and right margins of all of them to each plot's [`margins`](#props) prop. |
 | `csvExport` | [`PlotCsvExportEvent`](#types) | An export to CSV has `'started'`, made `'progress'` (with a `percent`), or `'finished'` (with whether it was a `success`), so that its progress can be shown. |
+| `imageExport` | [`PlotImageExportEvent`](#types) | The plot has been copied to the clipboard or exported to an image (or has failed to be), so that the user can be told about it. |
 | `contextMenu` | [`PlotContextMenuEvent`](#types) | Only with [`customContextMenu`](#props): the context menu was requested at `clientX`/`clientY`, with the `items` that our context menu would have shown. If `usingKeyboard` is true, the custom menu should take the keyboard focus. |
 
 ### Methods
@@ -176,18 +178,20 @@ Like with [Plotly](https://plotly.com/javascript/):
 - **Plotting area:** drag to zoom (along one axis if the drag is mostly horizontal or vertical), Shift+drag to pan, use the mouse wheel to zoom around the mouse pointer, and double-click to reset the zoom.
 - **Middle of an axis:** drag to pan along that axis, use the mouse wheel to zoom along it, and double-click to reset its zoom.
 - **Ends of an axis and bottom corners:** drag to move an end of the axis, or click an end of the axis to type its value.
-- **Legend:** click a trace to show or hide it, double-click it to only show that trace, and hover it to highlight its trace.
+- **Legend:** click a trace to show or hide it, double-click it to only show that trace (or all the traces again), and hover it to highlight its trace. Its context menu (right-click, or Shift+F10 once it has the focus) can also show only that trace (or all the traces again).
 - **Touch:** drag with one finger as with a mouse, or use two fingers to zoom and pan.
-- **Keyboard** (once the plot has the focus): `+` and `−` to zoom in and out, `0` to reset the zoom, the arrow keys to pan, and Shift+F10 (or the context menu key) to open the context menu.
+- **Keyboard** (once the plot has the focus): `+` and `−` to zoom in and out, `0` to reset the zoom, the arrow keys to pan, and Shift+F10 (or the context menu key) to open the context menu (e.g., to type the value of an end of an axis). Each legend item can also get the focus: Enter or Space shows or hides its trace, and Shift+F10 opens its context menu.
 - **Escape**, or pressing another mouse button, cancels a drag.
 
 Hovering shows the value of each visible trace at the X value under the mouse pointer. For a trace that is not a function of X (e.g., a phase plot), it shows the point closest to the mouse pointer instead.
 
-The context menu can zoom in and out, reset the zoom, make an axis logarithmic, copy the plot to the clipboard, export it as JPEG, PNG, SVG, or WebP, and export its data to CSV.
+The context menu can zoom in and out, reset the zoom, edit the range of an axis, make an axis logarithmic, copy the plot to the clipboard, export it as JPEG, PNG, SVG, or WebP, and export its data to CSV. When requested from a legend item, it can also show only that trace (or all the traces again).
+
+Copied and exported images always use the light colours (white background, dark text), whatever the current theme, since they are typically used in light documents.
 
 ### Theming
 
-Set any of these CSS variables on an ancestor of the component. Each has a light and a dark default, based on [PrimeVue](https://primevue.org/)'s Aura theme:
+Set any of these CSS variables on an ancestor of the component. Each has a light and a dark default, based on [PrimeVue](https://primevue.org/)'s Aura theme. They don't affect copied and exported images, which always use the light defaults:
 
 | Variable | Used for |
 |---|---|
