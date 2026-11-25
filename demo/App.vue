@@ -251,8 +251,8 @@ const instanceTheme = (index: number): PlotTheme => {
 
 // Our data, i.e. the data of each of our instances.
 // Note #1: we limit the total number of points that we plot since each point takes 16 bytes (8 bytes for its X value,
-//          which our traces share if possible, and 8 bytes for its Y value), e.g. 100,000,000 points take at least
-//          800 MB. So, the options that would exceed that limit are disabled.
+//          which our traces share if possible, and 8 bytes for its Y value), e.g. 100,000,000 points take at least 800
+//          MB. So, the options that would exceed that limit are disabled.
 // Note #2: we let our status get painted before generating our data since it may take a while.
 
 const MAX_TOTAL_NB_OF_POINTS = 100000000;

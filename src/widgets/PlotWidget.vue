@@ -9,17 +9,19 @@
     >
       <!--
       Note: our plot can be focused, so that it can be used with the keyboard (see onPlotKeyDown()), in which case it is
-            described to assistive technologies as an image of our plot.
+            described to assistive technologies as an application (i.e. a plot, see aria-roledescription), so that they
+            pass our keys (e.g., the arrow keys to pan) to us rather than use them to navigate the page.
       -->
       <div ref="plotDivRef" class="plot-area"
         tabindex="0"
-        role="img"
+        role="application"
         aria-roledescription="plot"
         :aria-label="plotLabel"
         :aria-describedby="plotDescriptionId"
         @keydown="onPlotKeyDown"
       />
-      <span :id="plotDescriptionId" class="visually-hidden">Press + or − to zoom in or out, 0 to reset the zoom, the arrow keys to pan, and Shift+F10 for more options (e.g., to export the plotted data to CSV).</span>
+      <span :id="plotDescriptionId" class="visually-hidden">Press + or − to zoom in or out, 0 to reset the zoom, the arrow keys to pan, and Shift+F10 for more options (e.g., to edit the range of an axis or to export the plotted data to CSV).</span>
+      <span :id="legendDescriptionId" class="visually-hidden">Press Shift+F10 to show only this trace (or all the traces again).</span>
       <svg v-if="zoomBox && plotRect" class="zoom-box"
         :style="{ left: `${plotRect.left}px`, top: `${plotRect.top}px` }"
         :width="plotRect.width"
@@ -116,7 +118,10 @@
         <button v-for="legendItem in legendItems" :key="legendItem.index" class="legend-item" :class="{ 'legend-item-hidden': !legendItem.visible }"
           type="button"
           :aria-pressed="legendItem.visible"
+          :aria-describedby="legendDescriptionId"
+          :data-legend-index="legendItem.index"
           @click="onLegendClick($event, legendItem.index)"
+          @keydown="onLegendKeyDown($event, legendItem.index)"
           @dblclick="onLegendDoubleClick(legendItem.index)"
           @pointerenter="onLegendPointerEnter($event, legendItem.index, legendItem.name)"
           @pointerleave="highlightTrace(null)"
@@ -275,6 +280,20 @@ export interface PlotCsvExportFinishedEvent {
 
 export type PlotCsvExportEvent = PlotCsvExportStartedEvent | PlotCsvExportProgressEvent | PlotCsvExportFinishedEvent;
 
+/**
+ * The payload of the `imageExport` event, which is emitted once the plot has been copied to the clipboard or exported
+ * to an image (or has failed to be), so that the user can be told about it.
+ */
+
+export interface PlotImageExportEvent {
+  /** Whether the plot was copied to the clipboard (`'copy'`) or exported to an image file (`'export'`). */
+  action: 'copy' | 'export';
+  /** The format of the image, which is always PNG when copying to the clipboard. */
+  format: 'jpeg' | 'png' | 'svg' | 'webp';
+  /** Whether the plot was copied to the clipboard or exported (and its file downloaded). */
+  success: boolean;
+}
+
 /** The value of the `theme` prop, i.e. whether to use light or dark mode, or whatever the system uses. */
 
 export type PlotTheme = 'system' | 'light' | 'dark';
@@ -379,6 +398,11 @@ const emit = defineEmits<{
   contextMenu: [event: PlotContextMenuEvent];
   /** An export to CSV has started, made some progress, or finished, so that its progress can be shown. */
   csvExport: [event: PlotCsvExportEvent];
+  /**
+   * The plot has been copied to the clipboard or exported to an image (or has failed to be), so that the user can be
+   * told about it (see `PlotImageExportEvent`).
+   */
+  imageExport: [event: PlotImageExportEvent];
   /**
    * The margins that the plot needs have changed. To line up several plots, pass the largest left and right margins of
    * all of them to the `margins` prop of each of them.
@@ -678,8 +702,8 @@ const updateOverlayThemeStyle = (): void => {
 // Note: a canvas doesn't understand CSS variables, so we resolve them (see resolvedColor()) for what gets drawn on
 //       uPlot's canvas (i.e. our grid lines, zero lines, and tick labels). This is fine since we resolve them whenever
 //       our plot gets created (which it does whenever our theme changes, see updatePlot()) or drawn, and our CSS
-//       variables get updated as soon as our theme changes (see theme.css). We also resolve them for our exports (see
-//       svgDocument()) since our CSS variables are not available to them.
+//       variables get updated as soon as our theme changes (see theme.css). Our exports, however, always use our light
+//       colours, whatever our current theme (see exportColors()).
 
 interface ThemeColors {
   background: string;
@@ -1083,30 +1107,78 @@ const onLegendDoubleClick = (index: number): void => {
   //       visible trace would isolate it again rather than show all the traces again.
 
   const firstClickToggle = lastLegendToggle?.index === index ? lastLegendToggle : undefined;
-  const visibilities = traceVisibilities.value;
 
   lastLegendToggle = undefined;
 
-  // Collect the indices of visible traces, as they were before this double-click.
+  isolateTrace(
+    index,
+    traceVisibilities.value.map((visible: boolean, i: number) =>
+      i === index && firstClickToggle ? firstClickToggle.previousVisibility : visible
+    )
+  );
+};
 
-  const visibleIndices: number[] = [];
+const isSoleVisibleTrace = (index: number, visibilities: boolean[] = traceVisibilities.value): boolean => {
+  // Return whether the given trace is the only visible one, given the visibilities of our traces.
 
-  for (let i = 0; i < visibilities.length; ++i) {
-    if (i === index && firstClickToggle ? firstClickToggle.previousVisibility : visibilities[i]) {
-      visibleIndices.push(i);
-    }
-  }
+  return visibilities.every((visible: boolean, i: number) => visible === (i === index));
+};
 
-  // If the clicked trace is the only visible one, then show all our traces again. Otherwise, isolate the clicked trace.
+const isolateTrace = (index: number, visibilities: boolean[] = traceVisibilities.value): void => {
+  // Isolate the given trace (i.e. hide all the other traces) or, if it is already the only visible trace (given the
+  // visibilities of our traces), show all our traces again (e.g., when double-clicking a legend item, or using our
+  // context menu when it is requested from a legend item).
 
-  const isSoleVisible = visibleIndices.length === 1 && visibleIndices[0] === index;
+  const isSoleVisible = isSoleVisibleTrace(index, visibilities);
 
   setTraceVisibilities(visibilities.map((_visible: boolean, i: number) => isSoleVisible || i === index));
 };
 
+const onLegendKeyDown = (event: KeyboardEvent, index: number): void => {
+  // Show our context menu for the given legend item (so that, for instance, its trace can be isolated using the
+  // keyboard) when Shift+F10 (or the context menu key) is pressed.
+
+  if (
+    (event.key === 'F10' && event.shiftKey && !event.ctrlKey && !event.metaKey && !event.altKey) ||
+    event.key === 'ContextMenu'
+  ) {
+    event.preventDefault();
+
+    showContextMenuUsingKeyboard(event.currentTarget as HTMLElement, index);
+  }
+};
+
 // Context menu.
 
+// Note #1: when requested from a legend item, our context menu starts with an item to isolate the trace of that legend
+//          item (or to show all our traces again), which is also how a trace can be isolated using the keyboard.
+// Note #2: our range editor is opened once our context menu has been hidden (and has given the keyboard focus back), so
+//          that it gets (and keeps) the keyboard focus, since it gets closed when it loses it.
+
+const contextMenuLegendIndex = vue.shallowRef<number | null>(null);
+
+const openRangeEditorLater = (type: AxisEnd): void => {
+  window.setTimeout(() => {
+    openRangeEditor(type);
+  });
+};
+
 const contextMenuItems = vue.computed<ContextMenuItem[]>(() => [
+  ...(contextMenuLegendIndex.value === null
+    ? []
+    : [
+        {
+          icon: 'eye' as const,
+          label: isSoleVisibleTrace(contextMenuLegendIndex.value) ? 'Show All Traces' : 'Show Only This Trace',
+          command: (
+            (index: number) => () =>
+              isolateTrace(index)
+          )(contextMenuLegendIndex.value)
+        },
+        {
+          separator: true as const
+        }
+      ]),
   {
     icon: 'search-plus',
     label: 'Zoom In',
@@ -1121,6 +1193,28 @@ const contextMenuItems = vue.computed<ContextMenuItem[]>(() => [
     icon: 'refresh',
     label: 'Reset Zoom',
     command: () => resetZoom()
+  },
+  {
+    icon: 'pencil',
+    label: 'Edit Axis Range',
+    items: [
+      {
+        label: 'X Axis Minimum',
+        command: () => openRangeEditorLater('w')
+      },
+      {
+        label: 'X Axis Maximum',
+        command: () => openRangeEditorLater('e')
+      },
+      {
+        label: 'Y Axis Minimum',
+        command: () => openRangeEditorLater('s')
+      },
+      {
+        label: 'Y Axis Maximum',
+        command: () => openRangeEditorLater('n')
+      }
+    ]
   },
   {
     separator: true
@@ -1182,6 +1276,7 @@ const contextMenuItems = vue.computed<ContextMenuItem[]>(() => [
 ]);
 
 let contextMenuShownUsingKeyboard = false;
+let contextMenuFocusTarget: HTMLElement | null = null;
 
 const showContextMenu = (event: MouseEvent): void => {
   // Show our context menu or, if we are to use a custom context menu, let people know that it should be shown (see
@@ -1195,9 +1290,14 @@ const showContextMenu = (event: MouseEvent): void => {
       items: contextMenuItems.value
     });
   } else {
+    // Note: our context menu items may just have changed (e.g., if our context menu is requested from a legend item,
+    //       see contextMenuItems), so we wait for our context menu to have been updated before showing it.
+
+    const usingKeyboard = contextMenuShownUsingKeyboard;
+
     updateOverlayThemeStyle();
 
-    void contextMenuRef.value?.show(event, contextMenuShownUsingKeyboard);
+    void vue.nextTick().then(() => contextMenuRef.value?.show(event, usingKeyboard));
   }
 };
 
@@ -1221,6 +1321,15 @@ const onContextMenu = (event: MouseEvent): void => {
   hover.value = null;
 
   contextMenuShownUsingKeyboard = false;
+
+  // Keep track of whether our context menu was requested from a legend item (see contextMenuItems), and of where the
+  // keyboard focus should go once our context menu has been hidden (see onContextMenuHide()).
+
+  const legendItemElement =
+    event.target instanceof Element ? event.target.closest<HTMLElement>('[data-legend-index]') : null;
+
+  contextMenuLegendIndex.value = legendItemElement ? Number(legendItemElement.dataset.legendIndex) : null;
+  contextMenuFocusTarget = legendItemElement;
 
   // Keep track of where our context menu was requested, so that we can zoom in/out around that position (see zoomIn()
   // and zoomOut()).
@@ -1250,7 +1359,7 @@ const onContextMenu = (event: MouseEvent): void => {
   showContextMenu(event);
 };
 
-const showContextMenuUsingKeyboard = (): void => {
+const showContextMenuUsingKeyboard = (legendItemElement?: HTMLElement, legendIndex?: number): void => {
   // Make sure that our plot has been laid out.
 
   const rect = plotRect.value;
@@ -1260,30 +1369,43 @@ const showContextMenuUsingKeyboard = (): void => {
     return;
   }
 
-  // Show our context menu at the centre of our plotting area, which is also where we zoom in/out (see zoomIn() and
-  // zoomOut()), and keep track of the fact that it was shown using the keyboard (see onContextMenuHide()).
+  // Show our context menu at the centre of our plotting area (which is also where we zoom in/out, see zoomIn() and
+  // zoomOut()) or, if it is for a legend item, at the centre of that legend item, and keep track of the fact that it
+  // was shown using the keyboard (see onContextMenuHide()).
   // Note: our context menu gets the keyboard focus when it is shown, so that it can be used with the keyboard straight
   //       away.
+
+  const legendItemRect = legendItemElement?.getBoundingClientRect();
 
   hover.value = null;
   contextMenuCenterFractions = {};
   contextMenuShownUsingKeyboard = true;
+  contextMenuLegendIndex.value = legendIndex ?? null;
+  contextMenuFocusTarget = legendItemElement ?? null;
 
   showContextMenu(
     new MouseEvent('contextmenu', {
-      clientX: mainDivRect.left + rect.left + 0.5 * rect.width,
-      clientY: mainDivRect.top + rect.top + 0.5 * rect.height
+      clientX: legendItemRect
+        ? legendItemRect.left + 0.5 * legendItemRect.width
+        : mainDivRect.left + rect.left + 0.5 * rect.width,
+      clientY: legendItemRect
+        ? legendItemRect.top + 0.5 * legendItemRect.height
+        : mainDivRect.top + rect.top + 0.5 * rect.height
     })
   );
 };
 
 const onContextMenuHide = (): void => {
-  // Give the keyboard focus back to our plot, whether our context menu was shown using the keyboard or the mouse (since
-  // it takes the keyboard focus in both cases, e.g., so that it can be hidden using Escape), unless the keyboard focus
-  // has gone somewhere else in the meantime (i.e. somewhere else than <body> or our context menu, which may keep the
-  // keyboard focus while it is being hidden).
+  // Give the keyboard focus back to our plot (or to the legend item from which our context menu was requested, see
+  // contextMenuFocusTarget), whether our context menu was shown using the keyboard or the mouse (since it takes the
+  // keyboard focus in both cases, e.g., so that it can be hidden using Escape), unless the keyboard focus has gone
+  // somewhere else in the meantime (i.e. somewhere else than <body> or our context menu, which may keep the keyboard
+  // focus while it is being hidden).
+
+  const focusTarget = contextMenuFocusTarget;
 
   contextMenuShownUsingKeyboard = false;
+  contextMenuFocusTarget = null;
 
   void vue.nextTick().then(() => {
     const activeElement = document.activeElement;
@@ -1292,7 +1414,7 @@ const onContextMenuHide = (): void => {
       !isUnmounted &&
       (!activeElement || activeElement === document.body || activeElement.closest('.opencor-context-menu'))
     ) {
-      plotDivRef.value?.focus();
+      (focusTarget?.isConnected ? focusTarget : plotDivRef.value)?.focus();
     }
   });
 };
@@ -1303,7 +1425,7 @@ const onContextMenuHide = (): void => {
 //       titles and legend, we use where the browser renders their text, so that any HTML they contain (e.g., subscripts
 //       and superscripts) gets rendered as it is in our panel.
 
-type ImageFormat = 'jpeg' | 'png' | 'svg' | 'webp';
+type ImageFormat = PlotImageExportEvent['format'];
 type RasterImageFormat = Exclude<ImageFormat, 'svg'>;
 
 interface SvgPath extends Path {
@@ -1362,9 +1484,9 @@ const svgPathElement = (path: SvgPath, attributes: string): string => {
   return path.data.length ? `<path d="${path.data.join('')}" ${attributes}/>` : '';
 };
 
-const svgHtmlText = (element: HTMLElement | null, origin: DOMRect, vertical: boolean): string => {
+const svgHtmlText = (element: HTMLElement | null, origin: DOMRect, vertical: boolean, color: string): string => {
   // Return the text of the given (rendered) element as SVG text elements (one per text node), positioned relative to
-  // the given origin.
+  // the given origin, using the given colour (see exportColors()).
   // Note: the client rectangle of a text node is the content area of its font, i.e. its alphabetic baseline is the
   //       font's ascent below its top. However, if our text is vertical (i.e. our Y axis title, which reads from bottom
   //       to top), then its baseline is the font's ascent to the right of its left.
@@ -1432,7 +1554,7 @@ const svgHtmlText = (element: HTMLElement | null, origin: DOMRect, vertical: boo
     res.push(
       `<text ${vertical ? `transform="translate(${svgNumber(x)} ${svgNumber(y)}) rotate(-90)"` : `x="${svgNumber(x)}" y="${svgNumber(y)}"`}` +
         ` font-family="${escapeXml(style.fontFamily)}" font-size="${style.fontSize}" font-style="${style.fontStyle}"` +
-        ` font-weight="${style.fontWeight}" fill="${style.color}"` +
+        ` font-weight="${style.fontWeight}" fill="${escapeXml(color)}"` +
         (decorations.size ? ` text-decoration="${[...decorations].join(' ')}"` : '') +
         `>${escapeXml(text.slice(start, end).replace(/[ \t\n\r\f]+/g, ' '))}</text>`
     );
@@ -1443,7 +1565,7 @@ const svgHtmlText = (element: HTMLElement | null, origin: DOMRect, vertical: boo
   return res.join('');
 };
 
-const svgLegend = (origin: DOMRect, scale: number): string => {
+const svgLegend = (origin: DOMRect, scale: number, colors: ExportColors): string => {
   // Return our legend, if it is shown, as an SVG group, clipped to what can currently be seen of it (e.g., if it is
   // scrollable).
 
@@ -1483,6 +1605,10 @@ const svgLegend = (origin: DOMRect, scale: number): string => {
 
     // Add the swatch of our legend item, if it has one.
 
+    // Note: the colour of our swatch (and of its marker) is that of our trace, or our hidden trace colour (in our
+    //       export colours) if our trace is hidden.
+
+    const swatchColor = legendItem.visible ? legendItem.color : colors.hiddenTrace;
     const swatchElement = legendItemElement.querySelector('.legend-swatch');
     const swatch = swatchElement?.getBoundingClientRect();
     const swatchStyle = swatchElement ? getComputedStyle(swatchElement) : undefined;
@@ -1492,7 +1618,7 @@ const svgLegend = (origin: DOMRect, scale: number): string => {
       const swatchTop = snap(swatch.top - origin.top);
 
       res.push(
-        `<rect x="${svgNumber(swatchLeft)}" y="${svgNumber(swatchTop)}" width="${svgNumber(snap(swatch.right - origin.left) - swatchLeft)}" height="${svgNumber(snap(swatch.bottom - origin.top) - swatchTop)}" rx="${svgNumber(Number.parseFloat(swatchStyle.borderRadius) || 0)}" fill="${escapeXml(swatchStyle.backgroundColor)}"/>`
+        `<rect x="${svgNumber(swatchLeft)}" y="${svgNumber(swatchTop)}" width="${svgNumber(snap(swatch.right - origin.left) - swatchLeft)}" height="${svgNumber(snap(swatch.bottom - origin.top) - swatchTop)}" rx="${svgNumber(Number.parseFloat(swatchStyle.borderRadius) || 0)}" fill="${escapeXml(swatchColor)}"/>`
       );
     }
 
@@ -1508,13 +1634,13 @@ const svgLegend = (origin: DOMRect, scale: number): string => {
       const markerBottom = snap(marker.bottom - origin.top);
 
       res.push(
-        `<circle cx="${svgNumber(0.5 * (markerLeft + markerRight))}" cy="${svgNumber(0.5 * (markerTop + markerBottom))}" r="${svgNumber(0.5 * (markerRight - markerLeft))}" fill="${escapeXml(getComputedStyle(markerElement).backgroundColor)}"/>`
+        `<circle cx="${svgNumber(0.5 * (markerLeft + markerRight))}" cy="${svgNumber(0.5 * (markerTop + markerBottom))}" r="${svgNumber(0.5 * (markerRight - markerLeft))}" fill="${escapeXml(swatchColor)}"/>`
       );
     }
 
     // Add the text of our legend item, which is the last child of our legend item element.
 
-    res.push(svgHtmlText(legendItemElement.lastElementChild as HTMLElement | null, origin, false), '</g>');
+    res.push(svgHtmlText(legendItemElement.lastElementChild as HTMLElement | null, origin, false, colors.text), '</g>');
   });
 
   res.push('</g>');
@@ -1522,6 +1648,49 @@ const svgLegend = (origin: DOMRect, scale: number): string => {
   // Return our legend as an SVG group.
 
   return res.join('');
+};
+
+// The colours of our exports, which are those of our light theme (whatever our current theme), since an exported image
+// is typically used in a document (e.g., a paper or some slides) that is light. They are our default light colours,
+// i.e. they ignore our public CSS variables, since those may customise our current theme (e.g., our dark theme).
+// Note: we resolve our colours using a temporary element, which has our (light) theme and resets our public CSS
+//       variables, so that our default colours get used (see theme.css).
+
+interface ExportColors {
+  background: string;
+  text: string;
+  tickLabel: string;
+  grid: string;
+  zeroLine: string;
+  hiddenTrace: string;
+}
+
+const exportColors = (): ExportColors => {
+  const element = document.createElement('div');
+
+  element.className = 'opencor-plot-theme';
+  element.style.display = 'none';
+
+  for (const variable of THEME_VARIABLES) {
+    element.style.setProperty(variable, 'initial');
+  }
+
+  document.body.append(element);
+
+  try {
+    const color = (themeColor: string): string => common.cssColor(themeColor, element);
+
+    return {
+      background: color(themeColors.background),
+      text: color(themeColors.text),
+      tickLabel: color(themeColors.tickLabel),
+      grid: color(themeColors.grid),
+      zeroLine: color(themeColors.zeroLine),
+      hiddenTrace: color(themeColors.hiddenTrace)
+    };
+  } finally {
+    element.remove();
+  }
 };
 
 const svgDocument = (scale: number = 1): SvgDocument => {
@@ -1556,11 +1725,12 @@ const svgDocument = (scale: number = 1): SvgDocument => {
   const scaledWidth = Math.round(scale * mainDiv.clientWidth);
   const scaledHeight = Math.round(scale * mainDiv.clientHeight);
   const traceLineWidth = LINE_WIDTH * scale;
+  const colors = exportColors();
   const res: string[] = [
     `<svg xmlns="http://www.w3.org/2000/svg" width="${scaledWidth}" height="${scaledHeight}" viewBox="0 0 ${scaledWidth} ${scaledHeight}">`,
     `<clipPath id="traces"><rect x="${svgNumber(left - 0.5 * traceLineWidth)}" y="${svgNumber(top - 0.5 * traceLineWidth)}" width="${svgNumber(width + traceLineWidth)}" height="${svgNumber(height + traceLineWidth)}"/></clipPath>`,
     `<clipPath id="markers"><rect x="${svgNumber(left)}" y="${svgNumber(top)}" width="${svgNumber(width)}" height="${svgNumber(height)}"/></clipPath>`,
-    `<rect width="${scaledWidth}" height="${scaledHeight}" fill="${resolvedColor(themeColors.background)}"/>`
+    `<rect width="${scaledWidth}" height="${scaledHeight}" fill="${escapeXml(colors.background)}"/>`
   ];
 
   // Our grid lines and zero lines, which get drawn in that order on uPlot's canvas (see drawZeroLines()).
@@ -1576,13 +1746,10 @@ const svgDocument = (scale: number = 1): SvgDocument => {
 
     linesPath(path, xValues, yValues, area, withinPlottingArea);
 
-    return svgPathElement(path, `stroke="${resolvedColor(color)}" stroke-width="${lineWidth(scale)}" fill="none"`);
+    return svgPathElement(path, `stroke="${escapeXml(color)}" stroke-width="${lineWidth(scale)}" fill="none"`);
   };
 
-  res.push(
-    lines(themeColors.grid, xSplits, ySplits, false),
-    lines(themeColors.zeroLine, zeroLines('x'), zeroLines('y'))
-  );
+  res.push(lines(colors.grid, xSplits, ySplits, false), lines(colors.zeroLine, zeroLines('x'), zeroLines('y')));
 
   // Our visible traces and their markers, if any, which uPlot draws in that order, trace by trace.
 
@@ -1631,15 +1798,15 @@ const svgDocument = (scale: number = 1): SvgDocument => {
   );
 
   res.push(
-    `<g font-family="${escapeXml(fontFamily)}" font-size="${TICK_FONT_SIZE}" fill="${resolvedColor(themeColors.tickLabel)}">${svgTickLabels.join('')}</g>`
+    `<g font-family="${escapeXml(fontFamily)}" font-size="${TICK_FONT_SIZE}" fill="${escapeXml(colors.tickLabel)}">${svgTickLabels.join('')}</g>`
   );
 
   // Our axis titles and legend, which we render on top of our plot.
 
   res.push(
-    svgHtmlText(xAxisTitleRef.value, origin, false),
-    svgHtmlText(yAxisTitleRef.value, origin, true),
-    svgLegend(origin, scale),
+    svgHtmlText(xAxisTitleRef.value, origin, false, colors.text),
+    svgHtmlText(yAxisTitleRef.value, origin, true, colors.text),
+    svgLegend(origin, scale, colors),
     '</g></svg>'
   );
 
@@ -1708,14 +1875,16 @@ const rasterImage = async (format: RasterImageFormat): Promise<Blob> => {
 };
 
 const copyToClipboard = (): void => {
-  // Copy our plot to the clipboard as a PNG image.
+  // Copy our plot to the clipboard as a PNG image, and let people know whether it worked (see PlotImageExportEvent).
   // Note #1: we give ClipboardItem a promise (rather than a blob) since Safari requires navigator.clipboard.write() to
   //          be called straight away, i.e. while handling the user's action.
   // Note #2: navigator.clipboard and ClipboardItem may not be available (e.g., in an insecure context), in which case
   //          an error gets thrown straight away, hence our try...catch.
 
-  const warn = (error: unknown): void => {
+  const failed = (error: unknown): void => {
     console.warn('@opencor/plot: failed to copy to clipboard:', common.formatError(error));
+
+    emit('imageExport', { action: 'copy', format: 'png', success: false });
   };
 
   try {
@@ -1725,14 +1894,17 @@ const copyToClipboard = (): void => {
           'image/png': rasterImage('png')
         })
       ])
-      .catch(warn);
+      .then(() => {
+        emit('imageExport', { action: 'copy', format: 'png', success: true });
+      })
+      .catch(failed);
   } catch (error: unknown) {
-    warn(error);
+    failed(error);
   }
 };
 
 const exportToImage = async (format: ImageFormat): Promise<void> => {
-  // Export our plot to an image in the given format.
+  // Export our plot to an image in the given format, and let people know whether it worked (see PlotImageExportEvent).
 
   try {
     if (format === 'svg') {
@@ -1740,8 +1912,12 @@ const exportToImage = async (format: ImageFormat): Promise<void> => {
     } else {
       common.downloadFile(`plot.${format}`, await rasterImage(format), `image/${format}`);
     }
+
+    emit('imageExport', { action: 'export', format, success: true });
   } catch (error: unknown) {
     console.warn('@opencor/plot: failed to export image:', common.formatError(error));
+
+    emit('imageExport', { action: 'export', format, success: false });
   }
 };
 
@@ -3403,13 +3579,23 @@ const closeRangeEditor = (apply: boolean): void => {
   // Note: the value is an actual value, so we convert it to the value that we plot (see plotValue()), which may not be
   //       valid (e.g., a non-positive value for a logarithmic axis).
 
+  // Note: if our range editor has the keyboard focus (e.g., it was closed using Enter or Escape, rather than by giving
+  //       the keyboard focus to something else), then we give it to our plot (since our range editor is about to be
+  //       removed and the keyboard focus would otherwise be lost), e.g., so that our range editor can be opened and
+  //       closed using the keyboard (see contextMenuItems).
+
   const text = rangeEditorRef.value?.textContent ?? '';
+  const hadFocus = !!rangeEditorRef.value?.contains(document.activeElement);
   const actualRangeEndValue = rangeEndValue(text);
   const value = actualRangeEndValue === undefined ? undefined : plotValue(editor.axisKey, actualRangeEndValue);
 
   rangeEditor.value = null;
 
   window.removeEventListener('pointerdown', onRangeEditorPointerDown, true);
+
+  if (hadFocus) {
+    plotDivRef.value?.focus();
+  }
 
   const range = currentRange(editor.axisKey);
 
@@ -3578,6 +3764,7 @@ const preventContextMenu = (event: MouseEvent): void => {
 const KEYBOARD_PAN_FRACTION = 0.1; // Fraction of the length of an axis by which it gets panned using an arrow key.
 
 const plotDescriptionId = `plot-description-${vue.useId()}`;
+const legendDescriptionId = `legend-description-${vue.useId()}`;
 
 const plainText = (html: string | undefined): string => {
   // Return the text of the given HTML (e.g., "<i>I<sub>K,r</sub></i>" becomes "IK,r").
