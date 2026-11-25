@@ -467,7 +467,10 @@ const show = async (event: MouseEvent, usingKeyboard: boolean = false): Promise<
 //       update: the focused item of a level remains focused (even if it has moved) as long as it can be identified, and
 //       so does an open submenu as long as its parent item can be identified and still has a submenu. Otherwise, that
 //       item is no longer focused (so that choosing the focused item can never run another action than the one that was
-//       focused) and that submenu gets closed. We then position our levels again since their size may have changed.
+//       focused) and that submenu gets closed. If that submenu had the keyboard focus, then the focus would be lost
+//       (since that submenu's list is gone), so we give it to our last remaining level, so that our context menu can
+//       still be used with the keyboard (and hidden using Escape). We then position our levels again since their size
+//       may have changed.
 
 const actionIndexes = (items: ContextMenuItem[], label: string): number[] => {
   // Return the indexes of the actions with the given label in the given items.
@@ -527,9 +530,15 @@ const updateLevels = async (items: ContextMenuItem[]): Promise<void> => {
     levelItems = parentItem.items;
   }
 
+  const hadFocus = !!containerRef.value?.contains(document.activeElement);
+
   levels.value = newLevels;
 
   await vue.nextTick();
+
+  if (hadFocus && levels.value.length && !containerRef.value?.contains(document.activeElement)) {
+    focusLevel(levels.value.length - 1);
+  }
 
   newLevels.forEach((_level: Level, levelIndex: number) => {
     positionLevel(levelIndex, anchorX, anchorY);
