@@ -2,7 +2,8 @@
 
 // Clean the type declarations that `vue-tsc` emitted for our library (see tsconfig.lib.types.json), i.e.:
 //  - remove their CSS side-effect imports (e.g., `import '../assets/theme.css';`); and
-//  - remove the type declarations that are not reachable from our entry point (i.e. dist/index.d.ts).
+//  - remove the type declarations that are not reachable from our entry point (i.e. dist/index.d.ts); and
+//  - give an explicit file extension to the relative imports of the remaining ones (e.g., './src/common/icons.js').
 // Note #1: CSS side-effect imports are kept by `vue-tsc` when it emits our type declarations, but they are of no use
 //          there (our CSS is bundled into opencor-plot.css) and some of them don't even exist in our package (e.g.,
 //          '../assets/theme.css'). So, a project that checks the type declarations of its dependencies (i.e. with
@@ -10,6 +11,13 @@
 //          to type check with TypeScript 6 or later (since noUncheckedSideEffectImports is then true by default).
 // Note #2: `vue-tsc` emits a type declaration for each of our source files, but only those that are reachable from our
 //          entry point are needed (e.g., not the one for our level of detail utilities).
+// Note #3: `vue-tsc` keeps our relative imports as they are in our source files (e.g., './src/common/icons'), but a
+//          project that uses the node16 or nodenext module resolution requires them to have an explicit file extension
+//          (since we are an ES module). Without one, such a project would fail to resolve our type declarations, so our
+//          types would silently become `any` (with skipLibCheck set to true) or fail to type check (with it set to
+//          false). So, we make each relative import refer to the JavaScript file that its type declaration describes
+//          (e.g., './src/common/icons.js' for src/common/icons.d.ts and './src/widgets/PlotWidget.vue.js' for
+//          src/widgets/PlotWidget.vue.d.ts), which is what TypeScript expects whatever the module resolution.
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -75,6 +83,25 @@ for (let file = filesToVisit.pop(); file !== undefined; file = filesToVisit.pop(
 for (const file of allFiles) {
   if (!reachableFiles.has(file)) {
     fs.rmSync(file);
+  }
+}
+
+// Give an explicit file extension to the relative imports of our remaining type declarations (see Note #3 above).
+
+for (const file of reachableFiles) {
+  const contents = fs.readFileSync(file, 'utf8');
+  const cleanedContents = contents.replace(RELATIVE_SPECIFIER, (match, specifier: string) => {
+    const javaScriptFile = path
+      .relative(path.dirname(file), declarationFile(file, specifier))
+      .split(path.sep)
+      .join('/')
+      .replace(/\.d\.ts$/, '.js');
+
+    return match.replace(specifier, javaScriptFile.startsWith('.') ? javaScriptFile : `./${javaScriptFile}`);
+  });
+
+  if (cleanedContents !== contents) {
+    fs.writeFileSync(file, cleanedContents);
   }
 }
 

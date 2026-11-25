@@ -32,12 +32,13 @@
   ],
   "type": "module",
   "types": "dist/index.d.ts",
-  "version": "0.20261125.1",
+  "version": "0.20261125.2",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
-      "import": "./dist/opencor-plot.es.js"
+      "default": "./dist/opencor-plot.es.js"
     },
+    "./package.json": "./package.json",
     "./style.css": "./dist/opencor-plot.css"
   },
   "scripts": {

@@ -67,17 +67,28 @@ import IconWidget from './IconWidget.vue';
 // Note #2: only one context menu should be shown at any given time, so we let our other context menus know when we are
 //          about to be shown, and we hide ourselves when another context menu is about to be shown.
 
+/** An action of a context menu. */
+
 export interface ContextMenuAction {
+  /** The label of the action. */
   label: string;
+  /** The icon of the action, if any. */
   icon?: IconName;
+  /** Whether the action is checked, only for a checkable action (e.g., to make an axis logarithmic). */
   checked?: boolean;
+  /** The command to call when the action is chosen, if any. */
   command?: () => void;
+  /** The items of the submenu of the action, if any. */
   items?: ContextMenuItem[];
 }
+
+/** A separator of a context menu. */
 
 export interface ContextMenuSeparator {
   separator: true;
 }
+
+/** An item of a context menu, i.e. an action or a separator. */
 
 export type ContextMenuItem = ContextMenuAction | ContextMenuSeparator;
 
