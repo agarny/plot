@@ -181,6 +181,7 @@ import PlotLivePointsWidget, { type PlotLivePoint } from './PlotLivePointsWidget
  * A trace to plot, which can be a function of X (e.g., against time) or not (e.g., a phase plot). A trace with fewer
  * than 20 points is also drawn with markers.
  */
+
 export interface PlotTrace {
   /**
    * The name of the trace, as shown in the legend, the hover tooltip, and the CSV export. It can contain a little HTML
@@ -219,6 +220,7 @@ export interface PlotTrace {
  * The data to plot. It is not watched, so to update it, give the plot a new `PlotData` object (see
  * {@link https://github.com/opencor/plot#large-and-live-data | Large and live data}).
  */
+
 export interface PlotData {
   /** The title of the X axis. It can contain a little HTML (see `PlotTrace.name`). */
   xAxisTitle?: string;
@@ -236,6 +238,7 @@ export interface PlotData {
  * The left and right margins of a plot, i.e. the space taken by its Y axis and legend. To line up several plots, pass
  * the largest left and right margins that their `marginsUpdated` events gave to the `margins` prop of each of them.
  */
+
 export interface PlotMargins {
   /** The left margin (in pixels), i.e. the space taken by the Y axis and its title. */
   left: number;
@@ -244,11 +247,13 @@ export interface PlotMargins {
 }
 
 /** The payload of the `csvExport` event when an export to CSV has started. */
+
 export interface PlotCsvExportStartedEvent {
   type: 'started';
 }
 
 /** The payload of the `csvExport` event when an export to CSV has made some progress. */
+
 export interface PlotCsvExportProgressEvent {
   type: 'progress';
   /** How far the export to CSV has got, from 0 to 100 (an integer). */
@@ -256,6 +261,7 @@ export interface PlotCsvExportProgressEvent {
 }
 
 /** The payload of the `csvExport` event when an export to CSV has finished. */
+
 export interface PlotCsvExportFinishedEvent {
   type: 'finished';
   /** Whether the export to CSV was successful (and the file was downloaded). */
@@ -266,15 +272,18 @@ export interface PlotCsvExportFinishedEvent {
  * The payload of the `csvExport` event, which can be used to show the progress of an export to CSV. Use its `type` to
  * tell which one it is.
  */
+
 export type PlotCsvExportEvent = PlotCsvExportStartedEvent | PlotCsvExportProgressEvent | PlotCsvExportFinishedEvent;
 
 /** The value of the `theme` prop, i.e. whether to use light or dark mode, or whatever the system uses. */
+
 export type PlotTheme = 'system' | 'light' | 'dark';
 
 /**
  * The value returned by the `pointCounts()` method, i.e. how much drawing only the points that are needed for the
  * traces to look the same helps. Mainly meant for testing and benchmarking.
  */
+
 export interface PlotPointCounts {
   /** The number of points of the visible traces. */
   nbOfPoints: number;
@@ -286,6 +295,7 @@ export interface PlotPointCounts {
  * The value returned by the `memoryUsage()` method, i.e. the memory (in bytes) used by the plot itself, not counting
  * its data. Mainly meant for testing and benchmarking.
  */
+
 export interface PlotMemoryUsage {
   /** The memory used by the levels of detail of the traces and the buffers of their selected points. */
   levelOfDetail: number;
@@ -298,6 +308,7 @@ export interface PlotMemoryUsage {
  * `customContextMenu` prop is set, so that a custom context menu can be shown instead. Once it has been hidden, call
  * the `contextMenuHidden()` method, so that the plot can get the keyboard focus back, if needed.
  */
+
 export interface PlotContextMenuEvent {
   /** The X coordinate (in client coordinates) where the context menu was requested. */
   clientX: number;
@@ -545,6 +556,7 @@ const memoryUsage = (): PlotMemoryUsage => {
 // Note: we give the type of our methods explicitly, so that their JSDoc comments make it into our type declarations.
 
 /** The methods of the plot, which are available through a template ref. */
+
 interface PlotMethods {
   /**
    * Tell the plot that a custom context menu (see the `contextMenu` event) has been hidden, so that it can get the

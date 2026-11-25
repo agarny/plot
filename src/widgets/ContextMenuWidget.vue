@@ -68,6 +68,7 @@ import IconWidget from './IconWidget.vue';
 //          about to be shown, and we hide ourselves when another context menu is about to be shown.
 
 /** An action of a context menu. */
+
 export interface ContextMenuAction {
   /** The label of the action. */
   label: string;
@@ -82,11 +83,13 @@ export interface ContextMenuAction {
 }
 
 /** A separator of a context menu. */
+
 export interface ContextMenuSeparator {
   separator: true;
 }
 
 /** An item of a context menu, i.e. an action or a separator. */
+
 export type ContextMenuItem = ContextMenuAction | ContextMenuSeparator;
 
 const props = defineProps<{
