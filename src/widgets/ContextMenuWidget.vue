@@ -414,6 +414,9 @@ const onWindowBlurOrResize = (): void => {
 
 const CONTEXT_MENU_SHOW_EVENT = 'opencor-context-menu-show';
 
+let anchorX = 0;
+let anchorY = 0;
+
 const contextMenuId = Symbol('ContextMenuWidget');
 
 const show = async (event: MouseEvent, usingKeyboard: boolean = false): Promise<void> => {
@@ -434,12 +437,15 @@ const show = async (event: MouseEvent, usingKeyboard: boolean = false): Promise<
     window.addEventListener('resize', onWindowBlurOrResize);
   }
 
+  anchorX = event.clientX;
+  anchorY = event.clientY;
+
   const level: Level = {
     items: props.items,
     parentIndex: -1,
     focusedIndex: -1,
-    left: event.clientX,
-    top: event.clientY
+    left: anchorX,
+    top: anchorY
   };
 
   if (usingKeyboard) {
@@ -450,9 +456,58 @@ const show = async (event: MouseEvent, usingKeyboard: boolean = false): Promise<
 
   await vue.nextTick();
 
-  positionLevel(0, event.clientX, event.clientY);
+  positionLevel(0, anchorX, anchorY);
   focusLevel(0);
 };
+
+// Updating of our context menu while it is shown.
+// Note: our items may change while our context menu is shown (e.g., the label of an item may depend on some data that
+//       gets updated in the meantime), in which case we update our levels, closing a submenu which parent item doesn't
+//       have a submenu anymore, and no longer focusing an item which doesn't exist anymore (or is now a separator). We
+//       then position our levels again since their size may have changed.
+
+const updateLevels = async (items: ContextMenuItem[]): Promise<void> => {
+  if (!levels.value.length) {
+    return;
+  }
+
+  const newLevels: Level[] = [];
+  let levelItems: ContextMenuItem[] | undefined = items;
+
+  for (const level of levels.value) {
+    if (!levelItems) {
+      break;
+    }
+
+    const focusedItem = levelItems[level.focusedIndex];
+
+    newLevels.push({
+      ...level,
+      items: levelItems,
+      focusedIndex: focusedItem && !isSeparator(focusedItem) ? level.focusedIndex : -1
+    });
+
+    const nextLevel = levels.value[newLevels.length];
+    const parentItem: ContextMenuItem | undefined = nextLevel ? levelItems[nextLevel.parentIndex] : undefined;
+
+    levelItems = parentItem && !isSeparator(parentItem) ? parentItem.items : undefined;
+  }
+
+  levels.value = newLevels;
+
+  await vue.nextTick();
+
+  newLevels.forEach((_level: Level, levelIndex: number) => {
+    positionLevel(levelIndex, anchorX, anchorY);
+  });
+};
+
+vue.watch(
+  () => props.items,
+  (items: ContextMenuItem[]) => {
+    void updateLevels(items);
+  }
+);
 
 const hide = (): void => {
   if (!levels.value.length) {

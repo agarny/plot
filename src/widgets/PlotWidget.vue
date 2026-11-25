@@ -341,7 +341,9 @@ export interface PlotContextMenuEvent {
   usingKeyboard: boolean;
   /**
    * The items of our context menu, including their state (e.g., whether an axis is logarithmic) and their command
-   * (e.g., to zoom in around where the context menu was requested).
+   * (e.g., to zoom in around where the context menu was requested). They reflect the plot as it was when the context
+   * menu was requested and don't get updated if the data changes while the custom context menu is shown, but their
+   * commands always act on the plot as it is when they are chosen.
    */
   items: ContextMenuItem[];
 }
@@ -1147,8 +1149,9 @@ const openRangeEditorLater = (type: AxisEnd): void => {
 
 const legendTraceMenuItem = (index: number): ContextMenuItem => {
   // Return the item that our context menu starts with when it is requested from the given legend item.
-  // Note: our context menu keeps its items while it is shown, during which our data may get updated (e.g., traces may
-  //       get added or removed), so the action of our item is determined again when our item is chosen, so that it
+  // Note: our data may get updated while our context menu is shown (e.g., traces may get added or removed). Our context
+  //       menu then gets our new items (see ContextMenuWidget's updateLevels()), but a custom context menu keeps the
+  //       items that it was given, so the action of our item is determined again when our item is chosen, so that it
   //       applies to the visibility of our traces at that time (if the trace of our legend item still exists).
 
   return {
