@@ -176,6 +176,7 @@ import {
   logValues,
   valuesStatistics
 } from '../common/traceValues';
+import { isolatedTraceVisibilities, legendTraceAction, toggledTraceVisibilities } from '../common/traceVisibilityUtils';
 
 import '../assets/theme.css';
 
@@ -1084,19 +1085,12 @@ const onLegendClick = (event: MouseEvent, index: number): void => {
     return;
   }
 
-  // Use a copy of our visibilities since traceVisibilities is a shallow ref, i.e. we need to assign it a new array for
-  // our change to be picked up.
-
-  const visibilities = traceVisibilities.value.slice();
-
   lastLegendToggle = {
     index,
-    previousVisibility: visibilities[index] ?? true
+    previousVisibility: traceVisibilities.value[index] ?? true
   };
 
-  visibilities[index] = !lastLegendToggle.previousVisibility;
-
-  setTraceVisibilities(visibilities);
+  setTraceVisibilities(toggledTraceVisibilities(traceVisibilities.value, index));
 };
 
 const onLegendDoubleClick = (index: number): void => {
@@ -1110,28 +1104,14 @@ const onLegendDoubleClick = (index: number): void => {
 
   lastLegendToggle = undefined;
 
-  isolateTrace(
-    index,
-    traceVisibilities.value.map((visible: boolean, i: number) =>
-      i === index && firstClickToggle ? firstClickToggle.previousVisibility : visible
+  setTraceVisibilities(
+    isolatedTraceVisibilities(
+      traceVisibilities.value.map((visible: boolean, i: number) =>
+        i === index && firstClickToggle ? firstClickToggle.previousVisibility : visible
+      ),
+      index
     )
   );
-};
-
-const isSoleVisibleTrace = (index: number, visibilities: boolean[] = traceVisibilities.value): boolean => {
-  // Return whether the given trace is the only visible one, given the visibilities of our traces.
-
-  return visibilities.every((visible: boolean, i: number) => visible === (i === index));
-};
-
-const isolateTrace = (index: number, visibilities: boolean[] = traceVisibilities.value): void => {
-  // Isolate the given trace (i.e. hide all the other traces) or, if it is already the only visible trace (given the
-  // visibilities of our traces), show all our traces again (e.g., when double-clicking a legend item, or using our
-  // context menu when it is requested from a legend item).
-
-  const isSoleVisible = isSoleVisibleTrace(index, visibilities);
-
-  setTraceVisibilities(visibilities.map((_visible: boolean, i: number) => isSoleVisible || i === index));
 };
 
 const onLegendKeyDown = (event: KeyboardEvent, index: number): void => {
@@ -1151,7 +1131,9 @@ const onLegendKeyDown = (event: KeyboardEvent, index: number): void => {
 // Context menu.
 
 // Note #1: when requested from a legend item, our context menu starts with an item to isolate the trace of that legend
-//          item (or to show all our traces again), which is also how a trace can be isolated using the keyboard.
+//          item (or to show all our traces again), which is also how a trace can be isolated using the keyboard. If
+//          there is only one trace, then isolating it makes no sense, so that item shows or hides that trace instead
+//          (see legendTraceAction()).
 // Note #2: our range editor is opened once our context menu has been hidden (and has given the keyboard focus back), so
 //          that it gets (and keeps) the keyboard focus, since it gets closed when it loses it.
 
@@ -1163,18 +1145,25 @@ const openRangeEditorLater = (type: AxisEnd): void => {
   });
 };
 
+const legendTraceMenuItem = (index: number): ContextMenuItem => {
+  // Return the item that our context menu starts with when it is requested from the given legend item.
+
+  const action = legendTraceAction(traceVisibilities.value, props.data.traces.length, index);
+
+  return {
+    icon: 'eye',
+    label: action.label,
+    command: () => {
+      setTraceVisibilities(action.visibilities);
+    }
+  };
+};
+
 const contextMenuItems = vue.computed<ContextMenuItem[]>(() => [
   ...(contextMenuLegendIndex.value === null
     ? []
     : [
-        {
-          icon: 'eye' as const,
-          label: isSoleVisibleTrace(contextMenuLegendIndex.value) ? 'Show All Traces' : 'Show Only This Trace',
-          command: (
-            (index: number) => () =>
-              isolateTrace(index)
-          )(contextMenuLegendIndex.value)
-        },
+        legendTraceMenuItem(contextMenuLegendIndex.value),
         {
           separator: true as const
         }
