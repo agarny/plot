@@ -463,26 +463,34 @@ const show = async (event: MouseEvent, usingKeyboard: boolean = false): Promise<
 // Updating of our context menu while it is shown.
 // Note: our items may change while our context menu is shown (e.g., the label of an item may depend on some data that
 //       gets updated in the meantime), in which case we update our levels. Our items may get recreated, so we identify
-//       an item by its label: the focused item of a level remains focused (even if it has moved) as long as there is
-//       still an item with the same label, and so does an open submenu as long as its parent item still has a submenu.
-//       Otherwise, that item is no longer focused (so that choosing the focused item can never run another action than
-//       the one that was focused) and that submenu gets closed. We then position our levels again since their size may
-//       have changed.
+//       an item by its label, but only if no other item of its level has the same label, both before and after the
+//       update: the focused item of a level remains focused (even if it has moved) as long as it can be identified, and
+//       so does an open submenu as long as its parent item can be identified and still has a submenu. Otherwise, that
+//       item is no longer focused (so that choosing the focused item can never run another action than the one that was
+//       focused) and that submenu gets closed. We then position our levels again since their size may have changed.
+
+const actionIndexes = (items: ContextMenuItem[], label: string): number[] => {
+  // Return the indexes of the actions with the given label in the given items.
+
+  return items.flatMap((item: ContextMenuItem, index: number) =>
+    !isSeparator(item) && item.label === label ? [index] : []
+  );
+};
 
 const matchingActionIndex = (items: ContextMenuItem[], oldItems: ContextMenuItem[], oldIndex: number): number => {
   // Return the index, in the given items, of the action that has the same label as the action at the given index in the
-  // given old items, preferring the same index, or -1 if there is no such action.
+  // given old items, or -1 if there is no such action or if that label is not unique in the given items or old items
+  // (in which case we can't tell which action is which).
 
   const oldItem = oldItems[oldIndex];
 
-  if (!oldItem || isSeparator(oldItem)) {
+  if (!oldItem || isSeparator(oldItem) || actionIndexes(oldItems, oldItem.label).length !== 1) {
     return -1;
   }
 
-  const isMatchingAction = (item: ContextMenuItem | undefined): boolean =>
-    item !== undefined && !isSeparator(item) && item.label === oldItem.label;
+  const indexes = actionIndexes(items, oldItem.label);
 
-  return isMatchingAction(items[oldIndex]) ? oldIndex : items.findIndex(isMatchingAction);
+  return indexes.length === 1 ? (indexes[0] as number) : -1;
 };
 
 const updateLevels = async (items: ContextMenuItem[]): Promise<void> => {
