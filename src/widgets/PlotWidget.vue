@@ -197,14 +197,14 @@ export interface PlotTrace {
   xValue: string;
   /**
    * The X values of the trace. A point with a non-finite X value (e.g., `NaN`) is a gap in the trace. For live data,
-   * see the Large and live data section of the README file.
+   * see {@link https://github.com/opencor/plot#large-and-live-data | Large and live data}.
    */
   x: Float64Array;
   /** What the Y values are (e.g., the name of a model variable), used in the CSV export. */
   yValue: string;
   /**
    * The Y values of the trace. A point with a non-finite Y value (e.g., `NaN`) is a gap in the trace. For live data,
-   * see the Large and live data section of the README file.
+   * see {@link https://github.com/opencor/plot#large-and-live-data | Large and live data}.
    */
   y: Float64Array;
   /** The colour of the trace, as a CSS colour (e.g., `'#1f77b4'`). */
@@ -216,8 +216,8 @@ export interface PlotTrace {
 }
 
 /**
- * The data to plot. It is not watched, so to update it, give the plot a new `PlotData` object (see the Large and live
- * data section of the README file).
+ * The data to plot. It is not watched, so to update it, give the plot a new `PlotData` object (see
+ * {@link https://github.com/opencor/plot#large-and-live-data | Large and live data}).
  */
 export interface PlotData {
   /** The title of the X axis. It can contain a little HTML (see `PlotTrace.name`). */
@@ -315,24 +315,37 @@ export interface PlotContextMenuEvent {
   items: ContextMenuItem[];
 }
 
-// Note #1: appendTo is where our overlays (i.e. our context menu, hover tooltip, and drag cursor) get appended, which
-//          is our document's body by default.
-// Note #2: customContextMenu is whether we should emit a contextMenu event rather than show our own context menu (see
-//          PlotContextMenuEvent).
-// Note #3: levelOfDetail is whether we should only go through the points that are needed for our traces to look the
-//          same (see linearPathPoints()) and only draw as many segments as are needed for them to look the same (see
-//          Note #6 of our level of detail), which is what we should normally do. It can, however, be disabled to see
-//          (e.g., in our demo) how much it helps.
-
 const props = withDefaults(
   defineProps<{
+    /** The data to plot (see `PlotData`). */
     data: PlotData;
+    /** Margins shared with other plots, so that their plotting areas line up (see the `marginsUpdated` event). */
     margins?: PlotMargins;
+    /**
+     * Whether to show the legend (`true` by default). The legend takes at most 40% of the width of the plot (with long
+     * trace names truncated, and shown in full when hovered), and is hidden if the plot is too narrow for it to be
+     * useful.
+     */
     showLegend?: boolean;
+    /** Whether to use light or dark mode, or whatever the system uses (`'system'` by default). */
     theme?: PlotTheme;
+    /** Where to append our overlays, i.e. our context menu, hover tooltip, and drag cursor (`'body'` by default). */
     appendTo?: HTMLElement | string;
+    /**
+     * Whether to emit a `contextMenu` event rather than show our own context menu (`false` by default). To have no
+     * context menu at all, set it and don't handle the `contextMenu` event.
+     */
     customContextMenu?: boolean;
+    /**
+     * Whether to only go through the points that are needed for a trace to look the same when drawing it, and to only
+     * draw as many segments as are needed for it to look the same (`true` by default). Hovering a trace whose X values
+     * are sorted always does the former. Only meant to be disabled to see how much it helps.
+     */
     levelOfDetail?: boolean;
+    /**
+     * Whether the data is live (e.g., while a simulation is running), in which case the last point of each visible
+     * trace is marked, making its latest value easy to spot (`false` by default).
+     */
     live?: boolean;
   }>(),
   {
@@ -344,9 +357,21 @@ const props = withDefaults(
   }
 );
 
+// Note: the JSDoc comments of our events don't make it into our type declarations (since Vue transforms their type),
+//       which is why those of their payload types (e.g., PlotCsvExportEvent) also describe them.
+
 const emit = defineEmits<{
+  /**
+   * Only with the `customContextMenu` prop: the context menu was requested, so that a custom context menu can be shown
+   * instead of ours (see `PlotContextMenuEvent`).
+   */
   contextMenu: [event: PlotContextMenuEvent];
+  /** An export to CSV has started, made some progress, or finished, so that its progress can be shown. */
   csvExport: [event: PlotCsvExportEvent];
+  /**
+   * The margins that the plot needs have changed. To line up several plots, pass the largest left and right margins of
+   * all of them to the `margins` prop of each of them.
+   */
   marginsUpdated: [newMargins: PlotMargins];
 }>();
 
@@ -517,7 +542,30 @@ const memoryUsage = (): PlotMemoryUsage => {
   return res;
 };
 
-defineExpose({
+// Note: we give the type of our methods explicitly, so that their JSDoc comments make it into our type declarations.
+
+/** The methods of the plot, which are available through a template ref. */
+interface PlotMethods {
+  /**
+   * Tell the plot that a custom context menu (see the `contextMenu` event) has been hidden, so that it can get the
+   * keyboard focus back, if needed.
+   */
+  contextMenuHidden: () => void;
+  /**
+   * Return the memory (in bytes) used by the plot itself, not counting its data. It is not reactive, i.e. it is meant
+   * to be polled. Mainly meant for testing and benchmarking.
+   */
+  memoryUsage: () => PlotMemoryUsage;
+  /**
+   * Return the number of points of the visible traces and how many of them got drawn the last time the plot got drawn.
+   * It is not reactive, i.e. it is meant to be polled. Mainly meant for testing and benchmarking.
+   */
+  pointCounts: () => PlotPointCounts;
+  /** Emit the `marginsUpdated` event again (e.g., after the shared margins have been reset). */
+  resetMargins: () => void;
+}
+
+defineExpose<PlotMethods>({
   contextMenuHidden,
   memoryUsage,
   pointCounts,
