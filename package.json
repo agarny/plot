@@ -32,7 +32,7 @@
   ],
   "type": "module",
   "types": "dist/index.d.ts",
-  "version": "0.20261125.4",
+  "version": "0.20261125.5",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
