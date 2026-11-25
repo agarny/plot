@@ -38,6 +38,7 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/opencor-plot.es.js"
     },
+    "./package.json": "./package.json",
     "./style.css": "./dist/opencor-plot.css"
   },
   "scripts": {
