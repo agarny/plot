@@ -462,9 +462,28 @@ const show = async (event: MouseEvent, usingKeyboard: boolean = false): Promise<
 
 // Updating of our context menu while it is shown.
 // Note: our items may change while our context menu is shown (e.g., the label of an item may depend on some data that
-//       gets updated in the meantime), in which case we update our levels, closing a submenu which parent item doesn't
-//       have a submenu anymore, and no longer focusing an item which doesn't exist anymore (or is now a separator). We
-//       then position our levels again since their size may have changed.
+//       gets updated in the meantime), in which case we update our levels. Our items may get recreated, so we identify
+//       an item by its label: the focused item of a level remains focused (even if it has moved) as long as there is
+//       still an item with the same label, and so does an open submenu as long as its parent item still has a submenu.
+//       Otherwise, that item is no longer focused (so that choosing the focused item can never run another action than
+//       the one that was focused) and that submenu gets closed. We then position our levels again since their size may
+//       have changed.
+
+const matchingActionIndex = (items: ContextMenuItem[], oldItems: ContextMenuItem[], oldIndex: number): number => {
+  // Return the index, in the given items, of the action that has the same label as the action at the given index in the
+  // given old items, preferring the same index, or -1 if there is no such action.
+
+  const oldItem = oldItems[oldIndex];
+
+  if (!oldItem || isSeparator(oldItem)) {
+    return -1;
+  }
+
+  const isMatchingAction = (item: ContextMenuItem | undefined): boolean =>
+    item !== undefined && !isSeparator(item) && item.label === oldItem.label;
+
+  return isMatchingAction(items[oldIndex]) ? oldIndex : items.findIndex(isMatchingAction);
+};
 
 const updateLevels = async (items: ContextMenuItem[]): Promise<void> => {
   if (!levels.value.length) {
@@ -472,25 +491,32 @@ const updateLevels = async (items: ContextMenuItem[]): Promise<void> => {
   }
 
   const newLevels: Level[] = [];
-  let levelItems: ContextMenuItem[] | undefined = items;
+  let levelItems: ContextMenuItem[] = items;
+  let parentIndex = -1;
 
-  for (const level of levels.value) {
-    if (!levelItems) {
-      break;
-    }
-
-    const focusedItem = levelItems[level.focusedIndex];
-
+  for (const [levelIndex, level] of levels.value.entries()) {
     newLevels.push({
       ...level,
       items: levelItems,
-      focusedIndex: focusedItem && !isSeparator(focusedItem) ? level.focusedIndex : -1
+      parentIndex,
+      focusedIndex: matchingActionIndex(levelItems, level.items, level.focusedIndex)
     });
 
-    const nextLevel = levels.value[newLevels.length];
-    const parentItem: ContextMenuItem | undefined = nextLevel ? levelItems[nextLevel.parentIndex] : undefined;
+    const nextLevel = levels.value[levelIndex + 1];
 
-    levelItems = parentItem && !isSeparator(parentItem) ? parentItem.items : undefined;
+    if (!nextLevel) {
+      break;
+    }
+
+    parentIndex = matchingActionIndex(levelItems, level.items, nextLevel.parentIndex);
+
+    const parentItem: ContextMenuItem | undefined = levelItems[parentIndex];
+
+    if (!parentItem || isSeparator(parentItem) || !parentItem.items) {
+      break;
+    }
+
+    levelItems = parentItem.items;
   }
 
   levels.value = newLevels;
