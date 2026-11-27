@@ -3570,11 +3570,13 @@ const onDragEnd = (event: PointerEvent): void => {
   stopDrag();
 
   // Keep showing our hover tooltip where we stopped scrubbing, if we were (see the scrubbing section below).
+  // Note: we update our hover tooltip straight away rather than in the next frame (see queueHoverUpdate()) since
+  //       stopping our drag has just hidden it, so it would otherwise flicker.
 
   if (currentDrag.scrubbing) {
     lastTap = undefined;
 
-    queueHoverUpdate();
+    updateHover();
 
     return;
   }
