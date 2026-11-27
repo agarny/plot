@@ -2920,7 +2920,9 @@ const toggleLogAxis = (axisKey: AxisKey): void => {
 // Note #2: a drag (or a pinch) can be cancelled by pressing the Escape key or another mouse button (e.g., the right
 //          one), by the browser taking over its pointer, or by our window losing the focus, in which case our ranges
 //          are restored (if they were changed while dragging or pinching). A zoom can also be cancelled by dragging
-//          back to where it started (like with Plotly).
+//          back to where it started (like with Plotly), and so can a pan or a drag of an axis (or a corner), as well as
+//          a pinch (by moving both fingers back to where they started), which is how a finger can cancel them (see
+//          isNearStart()).
 // Note #3: we handle our drags using pointer events (so that they also work with a pen or a finger), but we don't
 //          prevent the browser from emulating mouse events (i.e. "compatibility" mouse events), so that a tap still
 //          gets uPlot to move its cursor (and therefore shows our hover tooltip, see updateHover()), and a double-tap
@@ -3484,9 +3486,25 @@ const onDragEnd = (event: PointerEvent): void => {
   const pinch = currentDrag.pinch;
 
   if (pinch) {
-    if (pinch.pointers.has(event.pointerId)) {
-      applyPinch(pinch);
-      stopDrag();
+    const pointer = pinch.pointers.get(event.pointerId);
+    const rect = plotRect.value;
+
+    if (pointer && rect) {
+      const position = plotPosition(event, rect);
+
+      pointer.x = position.x;
+      pointer.y = position.y;
+
+      if (
+        Array.from(pinch.pointers.values()).every((somePointer: PinchPointer) =>
+          isNearStart(somePointer.x, somePointer.y, somePointer.startX, somePointer.startY)
+        )
+      ) {
+        cancelDrag();
+      } else {
+        applyPinch(pinch);
+        stopDrag();
+      }
     }
 
     return;
@@ -3550,13 +3568,20 @@ const onDragEnd = (event: PointerEvent): void => {
     lastTap = undefined;
   }
 
-  // If we were dragging an axis (or a corner), then make sure that our axes reflect where we stopped dragging or, like
-  // Plotly, open our range editor if we clicked one end of an axis (but not if it is the second click of a
-  // double-click, see onDoubleClick()).
+  // If we were dragging an axis (or a corner), then make sure that our axes reflect where we stopped dragging (or
+  // restore them if we stopped dragging where we started, see Note #2 above) or, like Plotly, open our range editor if
+  // we clicked one end of an axis (but not if it is the second click of a double-click, see onDoubleClick()).
 
   if (currentDrag.type !== 'nsew') {
     if (dragged) {
-      applyDrag(currentDrag);
+      const rect = plotRect.value;
+      const position = rect ? plotPosition(event, rect) : { x: currentDrag.x, y: currentDrag.y };
+
+      if (isNearStart(position.x, position.y, currentDrag.startX, currentDrag.startY)) {
+        restoreRanges(currentDrag);
+      } else {
+        applyDrag(currentDrag);
+      }
     } else if (isAxisEnd(currentDrag.type) && (currentDrag.clickCount ?? 1) <= 1) {
       openRangeEditor(currentDrag.type);
     }
@@ -4146,10 +4171,23 @@ const cancelDrag = (): void => {
   stopDrag();
 
   if (currentDrag && (currentDrag.type !== 'nsew' || currentDrag.pinch)) {
-    zoomRanges = { ...currentDrag.zoomRanges };
-
-    setScales({ x: zoomRanges.x ?? null, y: zoomRanges.y ?? null });
+    restoreRanges(currentDrag);
   }
+};
+
+const restoreRanges = (currentDrag: Drag): void => {
+  // Restore the ranges that we had when the given drag started.
+
+  zoomRanges = { ...currentDrag.zoomRanges };
+
+  setScales({ x: zoomRanges.x ?? null, y: zoomRanges.y ?? null });
+};
+
+const isNearStart = (x: number, y: number, startX: number, startY: number): boolean => {
+  // Return whether the given position is close enough to where it started for a drag (or a pinch) that stops there to
+  // be cancelled (see Note #2 of the pointer interaction section), i.e. as close as a click must be (see MIN_DRAG).
+
+  return Math.max(Math.abs(x - startX), Math.abs(y - startY)) < MIN_DRAG;
 };
 
 const preventContextMenu = (event: MouseEvent): void => {
