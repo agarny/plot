@@ -160,7 +160,7 @@ To draw traces without our level of detail, use `:levelOfDetail="false"`. Our pa
 | `marginsUpdated` | [`PlotMargins`](#types) | The margins that the plot needs have changed. To line up several plots, pass the largest left and right margins of all of them to each plot's [`margins`](#props) prop. |
 | `csvExport` | [`PlotCsvExportEvent`](#types) | An export to CSV has `'started'`, made `'progress'` (with a `percent`), or `'finished'` (with whether it was a `success`), so that its progress can be shown. |
 | `imageExport` | [`PlotImageExportEvent`](#types) | The plot has been copied to the clipboard or exported to an image (or has failed to be), so that the user can be told about it. |
-| `contextMenu` | [`PlotContextMenuEvent`](#types) | Only with [`customContextMenu`](#props): the context menu was requested at `clientX`/`clientY`, with the `items` that our context menu would have shown. If `usingKeyboard` is true, the custom menu should take the keyboard focus. |
+| `contextMenu` | [`PlotContextMenuEvent`](#types) | Only with [`customContextMenu`](#props): the context menu was requested at `clientX`/`clientY`, with the `items` that our context menu would have shown. If `usingKeyboard` is true, the custom menu should take the keyboard focus. The custom menu should call the `command` of the chosen item while handling the click (or tap, or key press) that chose it, and it shouldn't move the keyboard focus afterwards (calling [`contextMenuHidden()`](#methods) instead), since some commands (e.g., to edit the range of an axis) give the keyboard focus to an editor that closes when it loses it, and iOS only shows its virtual keyboard for such an editor while handling a user interaction. |
 
 ### Methods
 
@@ -169,7 +169,7 @@ Available through a template ref:
 | Method | Description |
 |---|---|
 | `resetMargins()` | Emit [`marginsUpdated`](#events) again, e.g. after the shared margins have been reset. |
-| `contextMenuHidden()` | Tell the plot that a custom context menu (see [`contextMenu`](#events)) has been hidden, so that it can get the keyboard focus back. |
+| `contextMenuHidden()` | Tell the plot that a custom context menu (see [`contextMenu`](#events)) has been hidden, so that it can get the keyboard focus back (unless something else, e.g. an editor opened by the chosen item, has it). |
 | `pointCounts()` | The number of points of the visible traces (`nbOfPoints`), and how many of them were last drawn (`nbOfDrawnPoints`), as a [`PlotPointCounts`](#types). Meant for testing and benchmarking. |
 | `memoryUsage()` | The memory (in bytes) used by the component itself, not counting the data, as a [`PlotMemoryUsage`](#types): by its levels of detail (`levelOfDetail`) and by the logarithm of its values along logarithmic axes (`logValues`). Meant for testing and benchmarking. |
 

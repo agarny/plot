@@ -354,6 +354,10 @@ export interface PlotMemoryUsage {
  * The payload of the `contextMenu` event, which is emitted rather than showing our context menu when the
  * `customContextMenu` prop is set, so that a custom context menu can be shown instead. Once it has been hidden, call
  * the `contextMenuHidden()` method, so that the plot can get the keyboard focus back, if needed.
+ * The custom context menu should call the `command` of the chosen item while handling the user interaction (e.g., a
+ * click) that chose it, and it shouldn't move the keyboard focus afterwards (calling `contextMenuHidden()` instead),
+ * since some commands (e.g., to edit the range of an axis) give the keyboard focus to an editor that gets closed when
+ * it loses it, and iOS only shows its virtual keyboard for such an editor while handling a user interaction.
  */
 
 export interface PlotContextMenuEvent {
@@ -1305,7 +1309,8 @@ const stopLegendPress = (): void => {
 //          (e.g., a tap). Our range editor gets the keyboard focus once it has been rendered, which is after our
 //          context menu has been hidden, so it keeps the keyboard focus (and remains open, since it gets closed when it
 //          loses it) since our context menu only gives the keyboard focus back if nothing else has it (see
-//          onContextMenuHide()).
+//          onContextMenuHide()). A custom context menu must behave the same, i.e. not move the keyboard focus once it
+//          has called the command of the chosen item (see PlotContextMenuEvent).
 // Note #3: we keep track of the trace of the legend item from which our context menu was requested using its key (see
 //          traceVisibilityKeys()) rather than its index, since our data may get updated while our context menu is
 //          shown, in which case the index of that trace may change (e.g., if a trace that comes before it gets removed)
