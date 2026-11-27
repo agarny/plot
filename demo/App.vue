@@ -151,7 +151,8 @@
       @keydown.escape="hideCustomMenu"
     >
       <li v-for="(item, index) in customMenu.items" :key="index">
-        <hr v-if="!item.command" />
+        <strong v-if="item.header">{{ item.label }}</strong>
+        <hr v-else-if="!item.command" />
         <button v-else type="button" @click="onCustomMenuItemClick(item.command)">{{ item.label }}</button>
       </li>
     </ul>
@@ -1088,16 +1089,34 @@ const statusRows = vue.computed(() => [
 
 interface CustomMenuItem {
   label: string;
+  header?: boolean;
   command?: () => void;
 }
 
 const customMenuRef = vue.useTemplateRef<HTMLElement>('customMenuRef');
 const customMenu = vue.ref<{ x: number; y: number; items: CustomMenuItem[]; instance: number } | null>(null);
 
+const headerLabel = (header: string): string => {
+  // Return the text of the given header, with its line breaks replaced with spaces, so that its lines don't run
+  // together.
+
+  const body = new DOMParser().parseFromString(header, 'text/html').body;
+
+  for (const lineBreak of body.querySelectorAll('br')) {
+    lineBreak.replaceWith(' ');
+  }
+
+  return body.textContent ?? '';
+};
+
 const flattenedItems = (items: ContextMenuItem[], prefix: string = ''): CustomMenuItem[] => {
   return items.flatMap((item: ContextMenuItem): CustomMenuItem[] => {
     if ('separator' in item) {
       return [{ label: '' }];
+    }
+
+    if ('header' in item) {
+      return [{ label: headerLabel(item.header), header: true }];
     }
 
     const label = `${prefix}${item.label}${item.checked ? ' ✓' : ''}`;
@@ -1318,6 +1337,11 @@ const onWindowPointerDown = (event: PointerEvent): void => {
   .demo-custom-menu button:hover,
   .demo-custom-menu button:focus-visible {
     background-color: var(--demo-border);
+  }
+
+  .demo-custom-menu strong {
+    display: block;
+    padding: 0.25rem 0.5rem;
   }
 
   .demo-custom-menu hr {

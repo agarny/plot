@@ -4,6 +4,7 @@
 export type { IconName } from './src/common/icons';
 export type {
   ContextMenuAction,
+  ContextMenuHeader,
   ContextMenuItem,
   ContextMenuSeparator
 } from './src/widgets/ContextMenuWidget.vue';

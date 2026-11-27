@@ -12,6 +12,7 @@
         :class="{ 'context-menu-submenu': levelIndex > 0 }"
         role="menu"
         aria-orientation="vertical"
+        :aria-labelledby="headerIds(level, levelIndex)"
         tabindex="-1"
         :aria-activedescendant="level.focusedIndex >= 0 ? itemId(levelIndex, level.focusedIndex) : undefined"
         :style="{ left: `${level.left}px`, top: `${level.top}px` }"
@@ -19,6 +20,7 @@
       >
         <template v-for="(item, index) in level.items" :key="index">
           <li v-if="isSeparator(item)" class="context-menu-separator" role="separator" />
+          <li v-else-if="isHeader(item)" :id="itemId(levelIndex, index)" class="context-menu-header" role="presentation" aria-hidden="true" v-html="sanitiseHtml(item.header)" />
           <li v-else :id="itemId(levelIndex, index)" class="context-menu-item"
             :class="{
               'context-menu-item-focused': level.focusedIndex === index,
@@ -47,6 +49,7 @@
 <script setup lang="ts">
 import * as vue from 'vue';
 
+import { sanitiseHtml } from '../common/common';
 import type { IconName } from '../common/icons';
 
 import IconWidget from './IconWidget.vue';
@@ -64,7 +67,11 @@ import IconWidget from './IconWidget.vue';
 //          assistive technologies. All the items of a menu (or submenu) that has a checked item have room for a check
 //          mark, so that their icons and labels remain aligned, while the items of a menu that has no checked item
 //          don't (so that no space is wasted).
-// Note #2: only one context menu should be shown at any given time, so we let our other context menus know when we are
+// Note #2: a header (e.g., the full name of a trace, which may be truncated in the legend) can't be focused or chosen,
+//          and it wraps rather than makes our context menu wider. A menu can only contain items, groups, and
+//          separators, so a header is hidden from assistive technologies, but it labels its menu (or submenu), so that
+//          it gets announced when its menu gets the keyboard focus.
+// Note #3: only one context menu should be shown at any given time, so we let our other context menus know when we are
 //          about to be shown, and we hide ourselves when another context menu is about to be shown.
 
 /** An action of a context menu. */
@@ -88,9 +95,19 @@ export interface ContextMenuSeparator {
   separator: true;
 }
 
-/** An item of a context menu, i.e. an action or a separator. */
+/** A header of a context menu, i.e. some text that can't be chosen (e.g., the name of a trace). */
 
-export type ContextMenuItem = ContextMenuAction | ContextMenuSeparator;
+export interface ContextMenuHeader {
+  /**
+   * The text of the header, which can contain a little HTML (`b`, `br`, `code`, `em`, `i`, `strong`, `sub`, and `sup`).
+   * Anything else is removed.
+   */
+  header: string;
+}
+
+/** An item of a context menu, i.e. an action, a separator, or a header. */
+
+export type ContextMenuItem = ContextMenuAction | ContextMenuSeparator | ContextMenuHeader;
 
 const props = defineProps<{
   items: ContextMenuItem[];
@@ -133,18 +150,36 @@ const itemId = (levelIndex: number, index: number): string => {
   return `${uid}-${levelIndex}-${index}`;
 };
 
+const headerIds = (level: Level, levelIndex: number): string | undefined => {
+  // Return the ids of the headers of the given level, if any, which label it (see Note #2 above).
+
+  const ids = level.items.flatMap((item: ContextMenuItem, index: number) =>
+    isHeader(item) ? [itemId(levelIndex, index)] : []
+  );
+
+  return ids.length ? ids.join(' ') : undefined;
+};
+
 const isSeparator = (item: ContextMenuItem): item is ContextMenuSeparator => {
   return 'separator' in item;
+};
+
+const isHeader = (item: ContextMenuItem): item is ContextMenuHeader => {
+  return 'header' in item;
+};
+
+const isAction = (item: ContextMenuItem): item is ContextMenuAction => {
+  return 'label' in item;
 };
 
 const actionAt = (levelIndex: number, index: number): ContextMenuAction | undefined => {
   const item = levels.value[levelIndex]?.items[index];
 
-  return item && !isSeparator(item) ? item : undefined;
+  return item && isAction(item) ? item : undefined;
 };
 
 const hasCheckColumn = (level: Level): boolean => {
-  return level.items.some((item: ContextMenuItem) => !isSeparator(item) && item.checked === true);
+  return level.items.some((item: ContextMenuItem) => isAction(item) && item.checked === true);
 };
 
 const isSubmenuOpen = (levelIndex: number, index: number): boolean => {
@@ -249,7 +284,7 @@ const nextItemIndex = (level: Level, fromIndex: number, step: 1 | -1): number =>
   for (let index = fromIndex + step; index >= 0 && index < level.items.length; index += step) {
     const item = level.items[index];
 
-    if (item && !isSeparator(item)) {
+    if (item && isAction(item)) {
       return index;
     }
   }
@@ -295,7 +330,7 @@ const searchItem = (levelIndex: number, character: string): void => {
     const index = (level.focusedIndex + i + nbOfItems) % nbOfItems;
     const item = level.items[index];
 
-    if (item && !isSeparator(item) && item.label.toLocaleLowerCase().startsWith(searchString)) {
+    if (item && isAction(item) && item.label.toLocaleLowerCase().startsWith(searchString)) {
       focusItem(levelIndex, index);
 
       return;
@@ -476,7 +511,7 @@ const actionIndexes = (items: ContextMenuItem[], label: string): number[] => {
   // Return the indexes of the actions with the given label in the given items.
 
   return items.flatMap((item: ContextMenuItem, index: number) =>
-    !isSeparator(item) && item.label === label ? [index] : []
+    isAction(item) && item.label === label ? [index] : []
   );
 };
 
@@ -487,7 +522,7 @@ const matchingActionIndex = (items: ContextMenuItem[], oldItems: ContextMenuItem
 
   const oldItem = oldItems[oldIndex];
 
-  if (!oldItem || isSeparator(oldItem) || actionIndexes(oldItems, oldItem.label).length !== 1) {
+  if (!oldItem || !isAction(oldItem) || actionIndexes(oldItems, oldItem.label).length !== 1) {
     return -1;
   }
 
@@ -523,7 +558,7 @@ const updateLevels = async (items: ContextMenuItem[]): Promise<void> => {
 
     const parentItem: ContextMenuItem | undefined = levelItems[parentIndex];
 
-    if (!parentItem || isSeparator(parentItem) || !parentItem.items) {
+    if (!parentItem || !isAction(parentItem) || !parentItem.items) {
       break;
     }
 
@@ -627,6 +662,34 @@ defineExpose({ show, hide });
     border-top: 1px solid var(--theme-overlay-border-color);
   }
 
+  /**
+   * Note: our header doesn't contribute to the width of our list (see Note #2 at the top of our script), hence its zero
+   *       width and minimum width of 100%.
+   */
+
+  .context-menu-header {
+    width: 0;
+    min-width: 100%;
+    padding: 0.375rem 0.5rem;
+    color: var(--theme-muted-text-color);
+    font-weight: 600;
+    overflow-wrap: anywhere;
+  }
+
+  .context-menu-header :deep(sub),
+  .context-menu-header :deep(sup) {
+    position: static;
+    font-size: 70%;
+  }
+
+  .context-menu-header :deep(sub) {
+    vertical-align: sub;
+  }
+
+  .context-menu-header :deep(sup) {
+    vertical-align: super;
+  }
+
   .context-menu-item {
     display: flex;
     gap: 0.5rem;
@@ -634,6 +697,16 @@ defineExpose({ show, hide });
     padding: 0.375rem 0.5rem;
     border-radius: var(--theme-border-radius);
     cursor: pointer;
+  }
+
+  /**
+   * Note: with a coarse pointer (e.g., a finger), our items are about 44 pixels high, so that they are easy to touch.
+   */
+
+  @media (any-pointer: coarse) {
+    .context-menu-item {
+      padding-block: 0.75rem;
+    }
   }
 
   .context-menu-item-focused,
