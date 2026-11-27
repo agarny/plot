@@ -19,6 +19,17 @@ export const axisEndSize = (axisLength: number, minSize: number): number => {
   return Math.min(Math.max(0.1 * axisLength, minSize), 0.25 * axisLength);
 };
 
+export const pinchShift = (length: number, startCenter: number, center: number, factor: number): number => {
+  // Return the largest distance by which a pinch moves something along an axis of the given length, i.e. once the given
+  // start center of that pinch has moved to the given center and everything around it has been scaled by the inverse
+  // of the given factor (see pinchedRange()).
+  // Note: that distance varies linearly along our axis, so it is largest at one of its ends.
+
+  const shift = (position: number): number => Math.abs(center + (position - startCenter) / factor - position);
+
+  return Math.max(shift(0), shift(length));
+};
+
 export interface Tap {
   /** When the tap was pressed (in milliseconds). */
   pressTime: number;

@@ -197,6 +197,7 @@ import {
   isDirectPointer,
   isDoubleTap,
   LongPress,
+  pinchShift,
   TOUCH_TARGET_SIZE,
   type Tap
 } from '../common/touchUtils';
@@ -2921,8 +2922,8 @@ const toggleLogAxis = (axisKey: AxisKey): void => {
 //          one), by the browser taking over its pointer, or by our window losing the focus, in which case our ranges
 //          are restored (if they were changed while dragging or pinching). A zoom can also be cancelled by dragging
 //          back to where it started (like with Plotly), and so can a pan or a drag of an axis (or a corner), as well as
-//          a pinch (by moving both fingers back to where they started), which is how a finger can cancel them (see
-//          isNearStart()).
+//          a pinch (by moving both fingers back to where nothing in our plotting area has moved by MIN_DRAG or more),
+//          which is how a finger can cancel them (see isNearStart() and isPinchNearStart()).
 // Note #3: we handle our drags using pointer events (so that they also work with a pen or a finger), but we don't
 //          prevent the browser from emulating mouse events (i.e. "compatibility" mouse events), so that a tap still
 //          gets uPlot to move its cursor (and therefore shows our hover tooltip, see updateHover()), and a double-tap
@@ -3074,6 +3075,14 @@ interface Pinch {
   axisKeys: AxisKey[];
   xRange: Range;
   yRange: Range;
+}
+
+interface PinchGeometry {
+  factor: number;
+  startX: number;
+  startY: number;
+  x: number;
+  y: number;
 }
 
 interface Drag {
@@ -3502,12 +3511,7 @@ const onDragEnd = (event: PointerEvent): void => {
         pointer.y = position.y;
       }
 
-      if (
-        rect &&
-        Array.from(pinch.pointers.values()).every((somePointer: PinchPointer) =>
-          isNearStart(somePointer.x, somePointer.y, somePointer.startX, somePointer.startY)
-        )
-      ) {
+      if (rect && isPinchNearStart(pinch, rect)) {
         cancelDrag();
       } else {
         applyPinch(pinch);
@@ -3811,31 +3815,68 @@ const movePinch = (pinch: Pinch, event: PointerEvent, rect: PlotRect): void => {
   }
 };
 
-const applyPinch = (pinch: Pinch): void => {
-  // Make sure that our plot has been laid out and that we have two fingers that are far enough from each other for us
-  // to know how much closer to (or further from) each other they have moved.
+const pinchGeometry = (pinch: Pinch): PinchGeometry | undefined => {
+  // Make sure that we have two fingers that are far enough from each other for us to know how much closer to (or
+  // further from) each other they have moved.
 
-  const rect = plotRect.value;
   const [pointer1, pointer2] = Array.from(pinch.pointers.values());
 
-  if (!rect || !pointer1 || !pointer2) {
-    return;
+  if (!pointer1 || !pointer2) {
+    return undefined;
   }
 
   const startDistance = Math.hypot(pointer2.startX - pointer1.startX, pointer2.startY - pointer1.startY);
   const distance = Math.hypot(pointer2.x - pointer1.x, pointer2.y - pointer1.y);
 
   if (startDistance < MIN_DRAG || distance < MIN_DRAG) {
+    return undefined;
+  }
+
+  // Return by how much our ranges are to be scaled and where the point between our fingers started and now is.
+
+  return {
+    factor: startDistance / distance,
+    startX: 0.5 * (pointer1.startX + pointer2.startX),
+    startY: 0.5 * (pointer1.startY + pointer2.startY),
+    x: 0.5 * (pointer1.x + pointer2.x),
+    y: 0.5 * (pointer1.y + pointer2.y)
+  };
+};
+
+const isPinchNearStart = (pinch: Pinch, rect: PlotRect): boolean => {
+  // Return whether the given pinch is close enough to where it started for it to be cancelled (see Note #2 of the
+  // pointer interaction section), i.e. whether nothing in our plotting area has moved by MIN_DRAG or more along the
+  // axes that we are pinching.
+  // Note: we can't check how far each finger has moved from where it started since a pinch scales our ranges by how
+  //       much closer to (or further from) each other our fingers have moved. So, a few pixels per finger can be a big
+  //       zoom when our fingers started close to each other.
+
+  const geometry = pinchGeometry(pinch);
+
+  if (!geometry) {
+    return false;
+  }
+
+  return (
+    (!pinch.axisKeys.includes('x') ||
+      pinchShift(rect.width, geometry.startX, geometry.x, geometry.factor) < MIN_DRAG) &&
+    (!pinch.axisKeys.includes('y') || pinchShift(rect.height, geometry.startY, geometry.y, geometry.factor) < MIN_DRAG)
+  );
+};
+
+const applyPinch = (pinch: Pinch): void => {
+  // Make sure that our plot has been laid out and that we know how to pinch.
+
+  const rect = plotRect.value;
+  const geometry = pinchGeometry(pinch);
+
+  if (!rect || !geometry) {
     return;
   }
 
   // Determine the new ranges of our axes and zoom into them.
 
-  const factor = startDistance / distance;
-  const startX = 0.5 * (pointer1.startX + pointer2.startX);
-  const startY = 0.5 * (pointer1.startY + pointer2.startY);
-  const x = 0.5 * (pointer1.x + pointer2.x);
-  const y = 0.5 * (pointer1.y + pointer2.y);
+  const { factor, startX, startY, x, y } = geometry;
   const ranges: Partial<Record<AxisKey, Range>> = {};
 
   if (pinch.axisKeys.includes('x')) {
@@ -4192,8 +4233,8 @@ const restoreRanges = (currentDrag: Drag): void => {
 };
 
 const isNearStart = (x: number, y: number, startX: number, startY: number): boolean => {
-  // Return whether the given position is close enough to where it started for a drag (or a pinch) that stops there to
-  // be cancelled (see Note #2 of the pointer interaction section), i.e. as close as a click must be (see MIN_DRAG).
+  // Return whether the given position is close enough to where it started for a drag that stops there to be cancelled
+  // (see Note #2 of the pointer interaction section), i.e. as close as a click must be (see MIN_DRAG).
 
   return Math.max(Math.abs(x - startX), Math.abs(y - startY)) < MIN_DRAG;
 };

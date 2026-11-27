@@ -7,6 +7,7 @@ import {
   isDoubleTap,
   LONG_PRESS_DURATION,
   LongPress,
+  pinchShift,
   TOUCH_TARGET_SIZE
 } from './touchUtils';
 
@@ -40,6 +41,38 @@ describe('axisEndSize()', () => {
   it('returns at most 25% of the length of an axis', () => {
     expect(axisEndSize(100, TOUCH_TARGET_SIZE)).toBe(25);
     expect(axisEndSize(0, TOUCH_TARGET_SIZE)).toBe(0);
+  });
+});
+
+// pinchShift().
+
+describe('pinchShift()', () => {
+  it('returns 0 if nothing has moved', () => {
+    expect(pinchShift(600, 300, 300, 1)).toBe(0);
+    expect(pinchShift(600, 100, 100, 1)).toBe(0);
+  });
+
+  it('returns how far our center has moved if we have only panned', () => {
+    expect(pinchShift(600, 300, 305, 1)).toBe(5);
+    expect(pinchShift(600, 300, 295, 1)).toBe(5);
+  });
+
+  it('returns how far an end of our axis has moved if we have zoomed', () => {
+    expect(pinchShift(100, 50, 50, 0.5)).toBe(50);
+    expect(pinchShift(100, 50, 50, 2)).toBe(25);
+    expect(pinchShift(100, 0, 0, 0.5)).toBe(100);
+    expect(pinchShift(100, 100, 100, 0.5)).toBe(100);
+  });
+
+  it('returns a large distance for a small pinch whose fingers started close together', () => {
+    // Two fingers that start 40 pixels apart in the middle of a 600-pixel axis, and that each move 7 pixels outwards.
+
+    expect(pinchShift(600, 300, 300, 40 / 54)).toBeCloseTo(105);
+  });
+
+  it('returns the largest distance by which something has moved if we have zoomed and panned', () => {
+    expect(pinchShift(100, 50, 60, 0.5)).toBe(60);
+    expect(pinchShift(100, 50, 40, 0.5)).toBe(60);
   });
 });
 
