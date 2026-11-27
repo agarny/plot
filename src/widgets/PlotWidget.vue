@@ -3362,8 +3362,9 @@ const onDragStart = (event: PointerEvent, type: DragType): void => {
     scrubbing: false
   };
 
-  // Listen for pointer, mouse, and keyboard events on the window, as well as for it losing focus, so that we can
-  // continue to drag even if our pointer leaves our plotting area, start pinching, and cancel our drag if needed.
+  // Listen for pointer, mouse, keyboard, and touch events on the window, as well as for it losing focus, so that we can
+  // continue to drag even if our pointer leaves our plotting area, start pinching, cancel our drag if needed, and stop
+  // the browser from scrolling the page while pinching (see onPlotTouchMove()).
 
   window.addEventListener('pointerdown', onDragPointerDown, true);
   window.addEventListener('pointermove', onDragMove);
@@ -3372,6 +3373,7 @@ const onDragStart = (event: PointerEvent, type: DragType): void => {
   window.addEventListener('mousedown', onDragMouseDown, true);
   window.addEventListener('keydown', onDragKeyDown, true);
   window.addEventListener('blur', cancelDrag);
+  window.addEventListener('touchmove', onPlotTouchMove, { capture: true, passive: false });
 };
 
 const onDragMove = (event: PointerEvent): void => {
@@ -4276,6 +4278,7 @@ const stopDrag = (): void => {
   window.removeEventListener('mousedown', onDragMouseDown, true);
   window.removeEventListener('keydown', onDragKeyDown, true);
   window.removeEventListener('blur', cancelDrag);
+  window.removeEventListener('touchmove', onPlotTouchMove, true);
 
   if (dragRafId !== undefined) {
     common.cancelFrame(dragRafId);
@@ -4335,8 +4338,11 @@ const onPlotTouchMove = (event: TouchEvent): void => {
   // Stop the browser from scrolling the page if a second finger is used on our plotting area (to pinch), if our finger
   // has been held long enough (to zoom, see Note #4 of the pointer interaction section), or if it can scrub our hover
   // tooltip (see the scrubbing section below).
-  // Note: a touch move can't be cancelled once the browser has started scrolling the page, in which case our drag has
-  //       already been cancelled (see onDragPointerCancel()).
+  // Note #1: a touch move can't be cancelled once the browser has started scrolling the page, in which case our drag
+  //          has already been cancelled (see onDragPointerCancel()).
+  // Note #2: a touch move goes to where its finger started, so we also listen to touch moves on the window while
+  //          dragging (see onDragStart()). Otherwise, the browser could scroll the page (and therefore cancel our
+  //          pinch) using a second finger that started elsewhere (e.g., on our legend or below our plot).
 
   if (event.cancelable && (event.touches.length > 1 || drag?.longPress?.fired || drag?.canScrub)) {
     event.preventDefault();
