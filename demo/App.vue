@@ -1096,6 +1096,19 @@ interface CustomMenuItem {
 const customMenuRef = vue.useTemplateRef<HTMLElement>('customMenuRef');
 const customMenu = vue.ref<{ x: number; y: number; items: CustomMenuItem[]; instance: number } | null>(null);
 
+const headerLabel = (header: string): string => {
+  // Return the text of the given header, with its line breaks replaced with spaces, so that its lines don't run
+  // together.
+
+  const body = new DOMParser().parseFromString(header, 'text/html').body;
+
+  for (const lineBreak of body.querySelectorAll('br')) {
+    lineBreak.replaceWith(' ');
+  }
+
+  return body.textContent ?? '';
+};
+
 const flattenedItems = (items: ContextMenuItem[], prefix: string = ''): CustomMenuItem[] => {
   return items.flatMap((item: ContextMenuItem): CustomMenuItem[] => {
     if ('separator' in item) {
@@ -1103,9 +1116,7 @@ const flattenedItems = (items: ContextMenuItem[], prefix: string = ''): CustomMe
     }
 
     if ('header' in item) {
-      return [
-        { label: new DOMParser().parseFromString(item.header, 'text/html').body.textContent ?? '', header: true }
-      ];
+      return [{ label: headerLabel(item.header), header: true }];
     }
 
     const label = `${prefix}${item.label}${item.checked ? ' ✓' : ''}`;
