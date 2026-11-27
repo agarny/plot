@@ -1230,7 +1230,22 @@ const onLegendPointerDown = (event: PointerEvent, index: number): void => {
 };
 
 const onLegendPressMove = (event: PointerEvent): void => {
-  if (event.pointerId === legendPress?.pointerId) {
+  // Keep track of how far our pointer has moved, in case it can't become a long press anymore or, if it already has,
+  // in case it has moved far enough for its long press to be cancelled (e.g., to back out of showing our context menu),
+  // since, unlike on our plotting area and axes, a drag doesn't mean anything else on a legend item.
+  // Note: the click that may follow the release of our pointer still gets swallowed (see onLongPress()), so that it
+  //       doesn't toggle the visibility of a trace (or do anything else).
+
+  if (event.pointerId !== legendPress?.pointerId) {
+    return;
+  }
+
+  if (
+    legendPress.longPress.fired &&
+    !isNearStart(event.clientX, event.clientY, legendPress.clientX, legendPress.clientY)
+  ) {
+    stopLegendPress();
+  } else {
     legendPress.longPress.move(event.clientX, event.clientY);
   }
 };
@@ -4253,7 +4268,8 @@ const restoreRanges = (currentDrag: Drag): void => {
 
 const isNearStart = (x: number, y: number, startX: number, startY: number): boolean => {
   // Return whether the given position is close enough to where it started for a drag that stops there to be cancelled
-  // (see Note #2 of the pointer interaction section), i.e. as close as a click must be (see MIN_DRAG).
+  // (see Note #2 of the pointer interaction section) or for a long press of a legend item not to be cancelled (see
+  // onLegendPressMove()), i.e. as close as a click must be (see MIN_DRAG).
 
   return Math.max(Math.abs(x - startX), Math.abs(y - startY)) < MIN_DRAG;
 };
