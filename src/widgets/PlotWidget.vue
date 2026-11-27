@@ -8,6 +8,7 @@
       @contextmenu="onContextMenu"
       @pointerdown.capture="onPanelPointerDown"
       @pointermove.capture="onPanelPointerMove"
+      @touchstart.passive="onPanelTouchStart"
       @touchend="onPanelTouchEnd"
       @click.capture="onPanelClick"
     >
@@ -17,6 +18,7 @@
             pass our keys (e.g., the arrow keys to pan) to us rather than use them to navigate the page.
       -->
       <div ref="plotDivRef" class="plot-area"
+        :class="{ 'pen-pointer': penPointer }"
         tabindex="0"
         role="application"
         aria-roledescription="plot"
@@ -2937,7 +2939,8 @@ const toggleLogAxis = (axisKey: AxisKey): void => {
 //          not zoom) the page, in which case the browser takes over our pointer (see onDragPointerCancel()), but we
 //          stop it from doing so if a second finger is used (to pinch) or once our pointer has been held long enough
 //          (to zoom, see onPlotTouchMove()). If the page can't be scrolled, then the browser may not take over our
-//          pointer, so we ignore its moves until it has been held long enough (see onDragMove()).
+//          pointer, so we ignore its moves until it has been held long enough (see onDragMove()). The same goes for a
+//          pen that the browser doesn't turn into touch events, since it can't scroll the page (see penPointer).
 // Note #5: with a coarse pointer, our axis (and corner) draggers can be touched up to TOUCH_TARGET_SIZE pixels away
 //          from our plotting area (see their touch inset), without changing our layout, and the ends of our axes are at
 //          least TOUCH_TARGET_SIZE pixels long (as long as there is room for them, see axisEndSize()).
@@ -4305,22 +4308,51 @@ const onLongPress = (clientX: number, clientY: number): void => {
   swallowClick = true;
 };
 
+// Whether a pen is used on our plotting area and the browser doesn't turn it into touch events (e.g., Chrome on
+// Windows), in which case we couldn't stop the browser from scrolling the page once our pen has been held long enough
+// (to zoom) or can scrub our hover tooltip (see onPlotTouchMove()). So, our plotting area then doesn't let the browser
+// handle the gestures of our pen (see touch-action below), unless we know that the browser turns pens into touch events
+// (e.g., Safari on iPadOS), in which case our pen can also be used to scroll the page.
+// Note: the browser decides how to handle a gesture when it starts, so we use the type of the pointer that hovers our
+//       panel, which is what a pen usually does before it touches our plotting area. If it doesn't, then only its
+//       subsequent gestures are handled by us.
+
+const penPointer = vue.shallowRef(false);
+let penTouchEvents = false;
+
+const trackPointerType = (pointerType: string): void => {
+  lastPointerType = pointerType;
+  penPointer.value = pointerType === 'pen' && !penTouchEvents;
+};
+
 const onPanelPointerDown = (event: PointerEvent): void => {
   // A new press can't be the end of a previous long press. Also keep track of the type of its pointer (see the
   // double-taps section above).
 
   swallowClick = false;
-  lastPointerType = event.pointerType;
+
+  trackPointerType(event.pointerType);
 };
 
 const onPanelPointerMove = (event: PointerEvent): void => {
   // Keep track of the type of the pointer that is moving over our panel since it may not be the one that was last
   // pressed, e.g., a mouse that hovers our plot after it was tapped, in which case our hover tooltip should be shown to
-  // the right of the mouse pointer rather than above it (see updateHover()).
+  // the right of the mouse pointer rather than above it (see updateHover()), or a pen that is about to touch our
+  // plotting area (see penPointer).
   // Note: this doesn't affect our double-taps (see the double-taps section above) since the mouse events that the
   //       browser emulates after a tap aren't pointer events.
 
-  lastPointerType = event.pointerType;
+  trackPointerType(event.pointerType);
+};
+
+const onPanelTouchStart = (): void => {
+  // A touch start that follows the press of a pen (see onPanelPointerDown()) means that the browser turns pens into
+  // touch events, so we can stop it from scrolling the page when needed (see onPlotTouchMove()).
+
+  if (lastPointerType === 'pen') {
+    penTouchEvents = true;
+    penPointer.value = false;
+  }
 };
 
 const onPanelTouchEnd = (event: TouchEvent): void => {
@@ -7282,7 +7314,8 @@ vue.watch(
 
   /**
    * Note #1: a finger (or a pen) used on one of our axes is for us to handle, while on our plotting area, it can also
-   *          be used by the browser to scroll (but not zoom) the page (see Note #4 of the pointer interaction section).
+   *          be used by the browser to scroll (but not zoom) the page (see Note #4 of the pointer interaction section),
+   *          unless it is a pen that the browser doesn't turn into touch events (see penPointer).
    * Note #2: on our plotting area, our axes, and our legend, a long press is for us to handle (see the long presses
    *          section), i.e. not for the browser to show its callout (e.g., on iOS) or to select some text.
    * Note #3: on our legend, a finger can scroll our legend (and the page), but a double-tap isolates a trace rather
@@ -7291,6 +7324,10 @@ vue.watch(
 
   :deep(.u-over) {
     touch-action: pan-x pan-y;
+  }
+
+  .pen-pointer :deep(.u-over) {
+    touch-action: none;
   }
 
   .dragger {
