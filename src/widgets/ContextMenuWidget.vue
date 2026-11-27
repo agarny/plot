@@ -12,6 +12,7 @@
         :class="{ 'context-menu-submenu': levelIndex > 0 }"
         role="menu"
         aria-orientation="vertical"
+        :aria-labelledby="headerIds(level, levelIndex)"
         tabindex="-1"
         :aria-activedescendant="level.focusedIndex >= 0 ? itemId(levelIndex, level.focusedIndex) : undefined"
         :style="{ left: `${level.left}px`, top: `${level.top}px` }"
@@ -19,7 +20,7 @@
       >
         <template v-for="(item, index) in level.items" :key="index">
           <li v-if="isSeparator(item)" class="context-menu-separator" role="separator" />
-          <li v-else-if="isHeader(item)" class="context-menu-header" role="presentation" v-html="sanitiseHtml(item.header)" />
+          <li v-else-if="isHeader(item)" :id="itemId(levelIndex, index)" class="context-menu-header" role="presentation" aria-hidden="true" v-html="sanitiseHtml(item.header)" />
           <li v-else :id="itemId(levelIndex, index)" class="context-menu-item"
             :class="{
               'context-menu-item-focused': level.focusedIndex === index,
@@ -67,7 +68,9 @@ import IconWidget from './IconWidget.vue';
 //          mark, so that their icons and labels remain aligned, while the items of a menu that has no checked item
 //          don't (so that no space is wasted).
 // Note #2: a header (e.g., the full name of a trace, which may be truncated in the legend) can't be focused or chosen,
-//          and it wraps rather than makes our context menu wider.
+//          and it wraps rather than makes our context menu wider. A menu can only contain items, groups, and
+//          separators, so a header is hidden from assistive technologies, but it labels its menu (or submenu), so that
+//          it gets announced when its menu gets the keyboard focus.
 // Note #3: only one context menu should be shown at any given time, so we let our other context menus know when we are
 //          about to be shown, and we hide ourselves when another context menu is about to be shown.
 
@@ -145,6 +148,16 @@ const setLevelElement = (levelIndex: number, element: unknown): void => {
 
 const itemId = (levelIndex: number, index: number): string => {
   return `${uid}-${levelIndex}-${index}`;
+};
+
+const headerIds = (level: Level, levelIndex: number): string | undefined => {
+  // Return the ids of the headers of the given level, if any, which label it (see Note #2 above).
+
+  const ids = level.items.flatMap((item: ContextMenuItem, index: number) =>
+    isHeader(item) ? [itemId(levelIndex, index)] : []
+  );
+
+  return ids.length ? ids.join(' ') : undefined;
 };
 
 const isSeparator = (item: ContextMenuItem): item is ContextMenuSeparator => {
