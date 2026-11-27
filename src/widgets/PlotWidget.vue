@@ -1200,7 +1200,7 @@ let legendPress: LegendPress | undefined;
 let lastLegendTap: (Tap & { key: string }) | undefined;
 
 const onLegendDoubleClickEvent = (index: number): void => {
-  if (!isDirectPointer(lastPointerType)) {
+  if (!handlesDoubleTaps(lastPointerType)) {
     onLegendDoubleClick(index);
   }
 };
@@ -1301,7 +1301,8 @@ const onLegendPressEnd = (event: PointerEvent): void => {
     x: currentLegendPress.clientX,
     y: currentLegendPress.clientY
   };
-  const doubleTapped = lastLegendTap?.key === key && isDoubleTap(lastLegendTap, tap);
+  const doubleTapped =
+    handlesDoubleTaps(event.pointerType) && lastLegendTap?.key === key && isDoubleTap(lastLegendTap, tap);
 
   lastLegendTap = doubleTapped ? undefined : { ...tap, key };
 
@@ -3634,7 +3635,8 @@ const onDragEnd = (event: PointerEvent): void => {
       x: currentDrag.startX,
       y: currentDrag.startY
     };
-    const doubleTapped = lastTap?.type === currentDrag.type && isDoubleTap(lastTap, tap);
+    const doubleTapped =
+      handlesDoubleTaps(currentDrag.pointerType) && lastTap?.type === currentDrag.type && isDoubleTap(lastTap, tap);
 
     lastTap = doubleTapped ? undefined : { ...tap, type: currentDrag.type };
 
@@ -3968,14 +3970,24 @@ const applyPinch = (pinch: Pinch): void => {
 // Double-taps, which we detect ourselves (see onDragEnd()) rather than rely on the browser turning them into double-
 // clicks, since not all browsers do (e.g., Chrome's device toolbar in DevTools doesn't). So, we ignore the double-
 // clicks that follow the press of a finger (or a pen), so that a double-tap doesn't also count as a double-click.
-// Note: a double-tap must be done on the same part of our plot (e.g., the middle of the X axis), and a press that moves
-//       or is held long enough (i.e. a swipe or a long press) can't be part of a double-tap.
+// Note #1: a double-tap must be done on the same part of our plot (e.g., the middle of the X axis), and a press that
+//          moves or is held long enough (i.e. a swipe or a long press) can't be part of a double-tap.
+// Note #2: a pen that the browser doesn't turn into touch events (e.g., Chrome on Windows) gets double-clicked by the
+//          browser as a mouse does, i.e. using the double-click speed of the system, which may be slower than
+//          DOUBLE_TAP_DELAY. So, we leave its double-clicks to the browser rather than detect its double-taps ourselves
+//          (see handlesDoubleTaps()).
 
 let lastTap: (Tap & { type: DragType }) | undefined;
 let lastPointerType = '';
 
+const handlesDoubleTaps = (pointerType: string): boolean => {
+  // Return whether we detect the double-taps of the given type of pointer ourselves (see Note #2 above).
+
+  return pointerType === 'touch' || (pointerType === 'pen' && penTouchEvents);
+};
+
 const onDoubleClickEvent = (type: DragType): void => {
-  if (!isDirectPointer(lastPointerType)) {
+  if (!handlesDoubleTaps(lastPointerType)) {
     onDoubleClick(type);
   }
 };
