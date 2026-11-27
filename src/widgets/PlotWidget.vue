@@ -2985,8 +2985,9 @@ const toggleLogAxis = (axisKey: AxisKey): void => {
 //          one), by the browser taking over its pointer, or by our window losing the focus, in which case our ranges
 //          are restored (if they were changed while dragging or pinching). A zoom can also be cancelled by dragging
 //          back to where it started (like with Plotly), and so can a pan or a drag of an axis (or a corner), as well as
-//          a pinch (by moving both fingers back to where nothing in our plotting area has moved by MIN_DRAG or more),
-//          which is how a finger can cancel them (see isNearStart() and isPinchNearStart()).
+//          a pinch (by moving both fingers back to where nothing in our plotting area has moved by MIN_DRAG or more,
+//          which only undoes our pinch, not the drag that it came from), which is how a finger can cancel them (see
+//          isNearStart() and isPinchNearStart()).
 // Note #3: we handle our drags using pointer events (so that they also work with a pen or a finger), but we don't
 //          prevent the browser from emulating mouse events (i.e. "compatibility" mouse events), so that a tap still
 //          gets uPlot to move its cursor (and therefore shows our hover tooltip, see updateHover()), and a double-tap
@@ -3140,6 +3141,7 @@ interface Pinch {
   axisKeys: AxisKey[];
   xRange: Range;
   yRange: Range;
+  zoomRanges: Partial<Record<AxisKey, Range>>;
 }
 
 interface PinchGeometry {
@@ -3580,7 +3582,8 @@ const onDragEnd = (event: PointerEvent): void => {
       }
 
       if (rect && isPinchNearStart(pinch, rect)) {
-        cancelDrag();
+        stopDrag();
+        restoreRanges(pinch.zoomRanges);
       } else {
         applyPinch(pinch);
         stopDrag();
@@ -3661,7 +3664,7 @@ const onDragEnd = (event: PointerEvent): void => {
       const position = rect ? plotPosition(event, rect) : { x: currentDrag.x, y: currentDrag.y };
 
       if (isNearStart(position.x, position.y, currentDrag.startX, currentDrag.startY)) {
-        restoreRanges(currentDrag);
+        restoreRanges(currentDrag.zoomRanges);
       } else {
         applyDrag(currentDrag);
       }
@@ -3830,8 +3833,9 @@ const startPinch = (currentDrag: Drag, event: PointerEvent): void => {
 
   // Stop dragging and start pinching using the finger with which we were dragging (from where it currently is) and the
   // second finger, using our current ranges (which we may have changed while dragging, e.g., an axis).
-  // Note: cancelling our pinch must restore the ranges that we have now rather than those that we had when our drag
-  //       started (see restoreRanges()), since it would otherwise also undo our drag.
+  // Note: moving our fingers back to where our pinch started only undoes our pinch, so we keep track of the ranges that
+  //       we have now (see onDragEnd()), while cancelling our pinch (e.g., using the Escape key) also undoes our drag,
+  //       i.e. restores the ranges that we had when our drag started (see cancelDrag()).
 
   if (dragRafId !== undefined) {
     common.cancelFrame(dragRafId);
@@ -3846,7 +3850,6 @@ const startPinch = (currentDrag: Drag, event: PointerEvent): void => {
   currentDrag.canScrub = false;
   currentDrag.scrubbing = false;
   currentDrag.zoomMode = '';
-  currentDrag.zoomRanges = { ...zoomRanges };
   currentDrag.pinch = {
     pointers: new Map([
       [currentDrag.pointerId, { startX: currentDrag.x, startY: currentDrag.y, x: currentDrag.x, y: currentDrag.y }],
@@ -3854,7 +3857,8 @@ const startPinch = (currentDrag: Drag, event: PointerEvent): void => {
     ]),
     axisKeys: draggedAxes(currentDrag.type),
     xRange,
-    yRange
+    yRange,
+    zoomRanges: { ...zoomRanges }
   };
 
   zoomBox.value = null;
@@ -4305,14 +4309,14 @@ const cancelDrag = (): void => {
   stopDrag();
 
   if (currentDrag && (currentDrag.type !== 'nsew' || currentDrag.pinch)) {
-    restoreRanges(currentDrag);
+    restoreRanges(currentDrag.zoomRanges);
   }
 };
 
-const restoreRanges = (currentDrag: Drag): void => {
-  // Restore the ranges that we had when the given drag (or its pinch, see startPinch()) started.
+const restoreRanges = (ranges: Partial<Record<AxisKey, Range>>): void => {
+  // Restore the given ranges, i.e. those that we had when a drag (or a pinch, see startPinch()) started.
 
-  zoomRanges = { ...currentDrag.zoomRanges };
+  zoomRanges = { ...ranges };
 
   setScales({ x: zoomRanges.x ?? null, y: zoomRanges.y ?? null });
 };
