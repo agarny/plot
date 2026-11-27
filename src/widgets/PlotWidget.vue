@@ -1296,8 +1296,12 @@ const stopLegendPress = (): void => {
 //          item (or to show all our traces again), which is also how a trace can be isolated using the keyboard. If
 //          there is only one trace, then isolating it makes no sense, so that item shows or hides that trace instead
 //          (see legendTraceAction()).
-// Note #2: our range editor is opened once our context menu has been hidden (and has given the keyboard focus back), so
-//          that it gets (and keeps) the keyboard focus, since it gets closed when it loses it.
+// Note #2: our range editor is opened straight away, i.e. while the item that opens it is being chosen, since iOS only
+//          shows its virtual keyboard if our range editor gets the keyboard focus while handling a user interaction
+//          (e.g., a tap). Our range editor gets the keyboard focus once it has been rendered, which is after our
+//          context menu has been hidden, so it keeps the keyboard focus (and remains open, since it gets closed when it
+//          loses it) since our context menu only gives the keyboard focus back if nothing else has it (see
+//          onContextMenuHide()).
 // Note #3: we keep track of the trace of the legend item from which our context menu was requested using its key (see
 //          traceVisibilityKeys()) rather than its index, since our data may get updated while our context menu is
 //          shown, in which case the index of that trace may change (e.g., if a trace that comes before it gets removed)
@@ -1331,12 +1335,6 @@ vue.watch(contextMenuLegendTraceIndex, (index: number) => {
     contextMenuRef.value?.hide();
   }
 });
-
-const openRangeEditorLater = (type: AxisEnd): void => {
-  window.setTimeout(() => {
-    openRangeEditor(type);
-  });
-};
 
 const legendTraceMenuItem = (key: string, index: number): ContextMenuItem => {
   // Return the item that our context menu starts with when it is requested from the legend item of the trace with the
@@ -1401,19 +1399,19 @@ const contextMenuItems = vue.computed<ContextMenuItem[]>(() => [
     items: [
       {
         label: 'X Axis Minimum',
-        command: () => openRangeEditorLater('w')
+        command: () => openRangeEditor('w')
       },
       {
         label: 'X Axis Maximum',
-        command: () => openRangeEditorLater('e')
+        command: () => openRangeEditor('e')
       },
       {
         label: 'Y Axis Minimum',
-        command: () => openRangeEditorLater('s')
+        command: () => openRangeEditor('s')
       },
       {
         label: 'Y Axis Maximum',
-        command: () => openRangeEditorLater('n')
+        command: () => openRangeEditor('n')
       }
     ]
   },
@@ -3900,6 +3898,9 @@ const openRangeEditor = (type: AxisEnd): void => {
   // Note #2: we listen to pointer presses rather than mouse presses since our range editor may have been opened using a
   //          tap, in which case a mouse press gets emulated once our range editor has been opened (see Note #3 of the
   //          pointer interaction section above), which would otherwise close it straight away.
+  // Note #3: vue.nextTick() resolves in a microtask, i.e. while the user interaction that opened our range editor (if
+  //          any) is still being handled, which iOS requires to show its virtual keyboard (see Note #2 of the context
+  //          menu section above).
 
   void vue.nextTick().then(() => {
     const element = rangeEditorRef.value;
