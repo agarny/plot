@@ -8,6 +8,7 @@
       @contextmenu="onContextMenu"
       @pointerdown.capture="onPanelPointerDown"
       @pointermove.capture="onPanelPointerMove"
+      @pointerleave="onPanelPointerLeave"
       @touchstart.passive="onPanelTouchStart"
       @touchend="onPanelTouchEnd"
       @click.capture="onPanelClick"
@@ -4432,7 +4433,9 @@ const followsRelease = (event: Event): boolean => {
 // (e.g., Safari on iPadOS), in which case our pen can also be used to scroll the page.
 // Note: the browser decides how to handle a gesture when it starts, so we use the type of the pointer that hovers our
 //       panel, which is what a pen usually does before it touches our plotting area. If it doesn't, then only its
-//       subsequent gestures are handled by us.
+//       subsequent gestures are handled by us. Similarly, a finger can't hover our panel, so we stop considering that a
+//       pen is used once it has left our panel (or has been lifted out of its hover range), since the next gesture may
+//       otherwise be that of a finger, which wouldn't then be able to scroll the page (see onPanelPointerLeave()).
 
 const penPointer = vue.shallowRef(false);
 let penTouchEvents = false;
@@ -4461,6 +4464,15 @@ const onPanelPointerMove = (event: PointerEvent): void => {
   //       browser emulates after a tap aren't pointer events.
 
   trackPointerType(event.pointerType);
+};
+
+const onPanelPointerLeave = (event: PointerEvent): void => {
+  // A pen that has left our panel (or has been lifted out of its hover range) isn't about to touch our plotting area
+  // anymore, so let the browser handle the gestures of a finger again (see penPointer).
+
+  if (event.pointerType === 'pen') {
+    penPointer.value = false;
+  }
 };
 
 const onPanelTouchStart = (): void => {
