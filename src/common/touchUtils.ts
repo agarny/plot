@@ -48,8 +48,8 @@ export const isDoubleTap = (firstTap: Tap | undefined, secondTap: Tap): boolean 
 };
 
 export class LongPress {
-  // A long press, i.e. a pointer that is held for LONG_PRESS_DURATION milliseconds without moving by the given tolerance
-  // (or more) along either axis, in which case the given callback gets called.
+  // A long press, i.e. a pointer that is held for LONG_PRESS_DURATION milliseconds without moving by the given
+  // tolerance (or more) along either axis, in which case the given callback gets called.
 
   private timeoutId: ReturnType<typeof setTimeout> | undefined;
   private hasFired = false;

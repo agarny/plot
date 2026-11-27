@@ -406,10 +406,10 @@ const processLevel = (
   // Process (up to the given number of) the points of our trace that the given level hasn't processed (see Note #5 and
   // Note #9 above), and return whether the level has no more than the given number of points, stopping as soon as it
   // has more (since it then gets dropped, see processedLevel()).
-  // Note: the points that we process again (i.e. from our snapshot or from our anchor, see below) don't count towards
-  //       the given number of points, so that we always process at least one new point.
-  // Note: our state (see PathLevelState for what it means) is kept in local variables rather than in a PathLevelState
-  //       object while we process our points, so that JavaScript engines can keep it in registers.
+  // Note #1: the points that we process again (i.e. from our snapshot or from our anchor, see below) don't count
+  //          towards the given number of points, so that we always process at least one new point.
+  // Note #2: our state (see PathLevelState for what it means) is kept in local variables rather than in a
+  //          PathLevelState object while we process our points, so that JavaScript engines can keep it in registers.
 
   const xOrigin = lod.xOrigin;
   const yOrigin = lod.yOrigin;
