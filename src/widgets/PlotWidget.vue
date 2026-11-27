@@ -1227,6 +1227,8 @@ const onLegendPointerDown = (event: PointerEvent, index: number): void => {
   window.addEventListener('pointermove', onLegendPressMove);
   window.addEventListener('pointerup', onLegendPressEnd);
   window.addEventListener('pointercancel', onLegendPressCancel);
+  window.addEventListener('pointerout', onLegendPressCancel);
+  window.addEventListener('blur', stopLegendPress);
 };
 
 const onLegendPressMove = (event: PointerEvent): void => {
@@ -1296,9 +1298,12 @@ const onLegendPressEnd = (event: PointerEvent): void => {
 };
 
 const onLegendPressCancel = (event: PointerEvent): void => {
-  // Stop tracking our press if the browser has taken over its pointer (e.g., to scroll our legend).
+  // Stop tracking our press if the browser has taken over its pointer (e.g., to scroll our legend) or if its pointer
+  // has left the window, in which case it may get released without us knowing (e.g., a pen without implicit pointer
+  // capture). Otherwise, we would keep ignoring the context menus requested from our legend item (see onContextMenu()).
+  // Note: we also stop tracking our press if the window loses the focus (see onLegendPointerDown()), as for a drag.
 
-  if (event.pointerId === legendPress?.pointerId) {
+  if (event.pointerId === legendPress?.pointerId && (event.type !== 'pointerout' || !event.relatedTarget)) {
     stopLegendPress();
   }
 };
@@ -1307,6 +1312,8 @@ const stopLegendPress = (): void => {
   window.removeEventListener('pointermove', onLegendPressMove);
   window.removeEventListener('pointerup', onLegendPressEnd);
   window.removeEventListener('pointercancel', onLegendPressCancel);
+  window.removeEventListener('pointerout', onLegendPressCancel);
+  window.removeEventListener('blur', stopLegendPress);
 
   legendPress?.longPress.cancel();
 
@@ -1544,8 +1551,14 @@ const onContextMenu = (event: MouseEvent): void => {
   // axes, or a legend item, whether while it is held (e.g., on Android) or once it has been released (e.g., on
   // Windows), since we handle such long presses ourselves, so that they behave the same on all platforms (see the long
   // presses section below).
+  // Note: a context menu that is requested while a legend item is pressed may come from something else than that press
+  //       (e.g., a mouse right-click on our plotting area while a finger rests on that legend item), so we only ignore
+  //       it if it is requested from that legend item.
 
-  if ((drag && isDirectPointer(drag.pointerType)) || legendPress) {
+  if (
+    (drag && isDirectPointer(drag.pointerType)) ||
+    (legendPress && event.target instanceof Node && legendPress.legendItemElement.contains(event.target))
+  ) {
     return;
   }
 
@@ -4327,10 +4340,11 @@ const scrub = (position: { x: number; y: number }, rect: PlotRect): void => {
 //          and we swallow the click that may follow the release of a pen. We do the same for the second tap of a
 //          double-tap on a legend item (see onLegendPressEnd()).
 // Note #4: the browser sends the events that follow the release of a pointer (e.g., a click) straight after it, so we
-//          only swallow a click and ignore a context menu while our long press is held or until RELEASE_EVENTS_DELAY
-//          milliseconds after its release (see followsRelease()). Otherwise, if the browser doesn't send them (e.g., a
-//          touch end that we prevent isn't followed by a click, and iOS never requests a context menu), the next ones
-//          would get swallowed/ignored (e.g., a context menu requested using the keyboard or an assistive technology).
+//          only swallow a click and ignore a context menu up to RELEASE_EVENTS_DELAY milliseconds after the release of
+//          our long press (see followsRelease()). Otherwise, if the browser doesn't send them (e.g., a touch end that
+//          we prevent isn't followed by a click, and iOS never requests a context menu), the next ones would get
+//          swallowed or ignored (e.g., a context menu requested using the keyboard or an assistive technology).
+//          Similarly, a context menu requested using a mouse while our long press is held mustn't get ignored.
 
 const RELEASE_EVENTS_DELAY = 300; // Maximum time (in milliseconds) between the release of a pointer and its events.
 
@@ -4391,7 +4405,7 @@ const followsRelease = (event: Event): boolean => {
   // Return whether the given event may follow the release of our long press, or of the second tap of a double-tap on a
   // legend item (see Note #4 above).
 
-  return heldLongPressPointerId !== undefined || event.timeStamp - releaseTime <= RELEASE_EVENTS_DELAY;
+  return event.timeStamp - releaseTime <= RELEASE_EVENTS_DELAY;
 };
 
 // Whether a pen is used on our plotting area and the browser doesn't turn it into touch events (e.g., Chrome on
