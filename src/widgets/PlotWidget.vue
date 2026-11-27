@@ -3480,22 +3480,30 @@ const onDragEnd = (event: PointerEvent): void => {
 
   // Finish our pinch, if any, once one of its pointers has been released, making sure that our axes reflect where we
   // stopped pinching.
-  // Note: we don't go back to dragging with the pointer that is still pressed, if any, since its drag would have to
-  //       start from wherever it is now (rather than from where our original drag started), which could be confusing.
+  // Note #1: we don't go back to dragging with the pointer that is still pressed, if any, since its drag would have to
+  //          start from wherever it is now (rather than from where our original drag started), which could be
+  //          confusing.
+  // Note #2: we must finish our pinch even if our plot isn't laid out anymore (e.g., it was hidden while pinching),
+  //          since our drag and its window listeners would otherwise stay alive. In that case, we can't tell where the
+  //          released pointer is, so we keep our axes as they were last pinched.
 
   const pinch = currentDrag.pinch;
 
   if (pinch) {
     const pointer = pinch.pointers.get(event.pointerId);
-    const rect = plotRect.value;
 
-    if (pointer && rect) {
-      const position = plotPosition(event, rect);
+    if (pointer) {
+      const rect = plotRect.value;
 
-      pointer.x = position.x;
-      pointer.y = position.y;
+      if (rect) {
+        const position = plotPosition(event, rect);
+
+        pointer.x = position.x;
+        pointer.y = position.y;
+      }
 
       if (
+        rect &&
         Array.from(pinch.pointers.values()).every((somePointer: PinchPointer) =>
           isNearStart(somePointer.x, somePointer.y, somePointer.startX, somePointer.startY)
         )
