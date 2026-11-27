@@ -3348,6 +3348,13 @@ const onDragStart = (event: PointerEvent, type: DragType): void => {
     pinch: undefined,
     longPress: isDirectPointer(event.pointerType)
       ? new LongPress(clientX, clientY, MIN_DRAG, () => {
+          // Our finger (or pen) has been held long enough, so it zooms rather than scrubs our hover tooltip (see
+          // Note #2 of the scrubbing section below).
+
+          if (drag) {
+            drag.canScrub = false;
+          }
+
           onLongPress(event.pointerId, clientX, clientY);
         })
       : undefined,
@@ -4356,8 +4363,10 @@ const onPlotTouchMove = (event: TouchEvent): void => {
 // Scrubbing, i.e. moving our hover tooltip using a finger (or a pen), since it can't hover our plotting area. A tap
 // followed straight away (see isDoubleTap()) by a drag on our plotting area scrubs our hover tooltip (rather than
 // scrolls the page or zooms), which then remains shown where our drag stopped, as it does after a tap.
-// Note: our hover tooltip follows uPlot's cursor (see updateHover()), so we move it to where our finger is (within our
-//       plotting area, so that our hover tooltip doesn't disappear if our finger goes beyond it).
+// Note #1: our hover tooltip follows uPlot's cursor (see updateHover()), so we move it to where our finger is (within
+//          our plotting area, so that our hover tooltip doesn't disappear if our finger goes beyond it).
+// Note #2: a finger (or a pen) that is held long enough before it moves doesn't scrub our hover tooltip, so that it can
+//          still zoom (or show our context menu) as after any long press (see the long presses section below).
 
 const scrub = (position: { x: number; y: number }, rect: PlotRect): void => {
   plot?.setCursor({
