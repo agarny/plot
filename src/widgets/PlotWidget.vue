@@ -3759,6 +3759,8 @@ const startPinch = (currentDrag: Drag, event: PointerEvent): void => {
 
   // Stop dragging and start pinching using the finger with which we were dragging (from where it currently is) and the
   // second finger, using our current ranges (which we may have changed while dragging, e.g., an axis).
+  // Note: cancelling our pinch must restore the ranges that we have now rather than those that we had when our drag
+  //       started (see restoreRanges()), since it would otherwise also undo our drag.
 
   if (dragRafId !== undefined) {
     common.cancelFrame(dragRafId);
@@ -3773,6 +3775,7 @@ const startPinch = (currentDrag: Drag, event: PointerEvent): void => {
   currentDrag.canScrub = false;
   currentDrag.scrubbing = false;
   currentDrag.zoomMode = '';
+  currentDrag.zoomRanges = { ...zoomRanges };
   currentDrag.pinch = {
     pointers: new Map([
       [currentDrag.pointerId, { startX: currentDrag.x, startY: currentDrag.y, x: currentDrag.x, y: currentDrag.y }],
@@ -4225,7 +4228,7 @@ const cancelDrag = (): void => {
 };
 
 const restoreRanges = (currentDrag: Drag): void => {
-  // Restore the ranges that we had when the given drag started.
+  // Restore the ranges that we had when the given drag (or its pinch, see startPinch()) started.
 
   zoomRanges = { ...currentDrag.zoomRanges };
 
