@@ -358,7 +358,10 @@ export interface PlotMemoryUsage {
  * The custom context menu should call the `command` of the chosen item while handling the user interaction (e.g., a
  * click) that chose it, and it shouldn't move the keyboard focus afterwards (calling `contextMenuHidden()` instead),
  * since some commands (e.g., to edit the range of an axis) give the keyboard focus to an editor that gets closed when
- * it loses it, and iOS only shows its virtual keyboard for such an editor while handling a user interaction.
+ * it loses it, and iOS only shows its virtual keyboard for such an editor while handling a user interaction. If the
+ * command is called while handling a key press (e.g., Enter or Space), then the default action of that key should be
+ * prevented (using `preventDefault()`), since that key would otherwise also be typed into such an editor (replacing its
+ * value, which is selected).
  */
 
 export interface PlotContextMenuEvent {
@@ -1350,7 +1353,10 @@ const stopLegendPress = (): void => {
 //          context menu has been hidden, so it keeps the keyboard focus (and remains open, since it gets closed when it
 //          loses it) since our context menu only gives the keyboard focus back if nothing else has it (see
 //          onContextMenuHide()). A custom context menu must behave the same, i.e. not move the keyboard focus once it
-//          has called the command of the chosen item (see PlotContextMenuEvent).
+//          has called the command of the chosen item (see PlotContextMenuEvent). Also, our range editor gets the
+//          keyboard focus while the key press that chose our item (if any) is being handled, so our context menu
+//          prevents the default action of that key (see ContextMenuWidget's onKeyDown()), and a custom context menu
+//          must do the same, since that key would otherwise also be typed into our range editor.
 // Note #3: we keep track of the trace of the legend item from which our context menu was requested using its key (see
 //          traceVisibilityKeys()) rather than its index, since our data may get updated while our context menu is
 //          shown, in which case the index of that trace may change (e.g., if a trace that comes before it gets removed)
