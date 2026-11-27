@@ -663,8 +663,8 @@ defineExpose({ show, hide });
   }
 
   /**
-   * Note: our header doesn't contribute to the width of our list (see Note #2 above), hence its zero width and minimum
-   *       width of 100%.
+   * Note: our header doesn't contribute to the width of our list (see Note #2 at the top of our script), hence its zero
+   *       width and minimum width of 100%.
    */
 
   .context-menu-header {
