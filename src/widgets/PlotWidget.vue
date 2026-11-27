@@ -2910,7 +2910,8 @@ const toggleLogAxis = (axisKey: AxisKey): void => {
 //  - a swipe scrolls the page (see Note #4 below);
 //  - a long press, i.e. holding still for a moment (see LongPress), followed by a drag zooms as with a mouse, while a
 //    long press that is released without dragging shows our context menu (as it does on our axes and legend items, see
-//    the long presses section below); and
+//    the long presses section below);
+//  - a tap followed straight away by a drag moves our hover tooltip (see the scrubbing section below); and
 //  - taps, double-taps, and pinches behave as described above.
 // Note #1: unlike Plotly, we don't have top corners (i.e. 'nw' and 'ne') since they would be above our plotting area,
 //          i.e. outside of our container since we don't have a top margin (and having one, just for them, would waste
@@ -3092,6 +3093,8 @@ interface Drag {
   box: Box;
   pinch: Pinch | undefined;
   longPress: LongPress | undefined;
+  canScrub: boolean;
+  scrubbing: boolean;
 }
 
 interface WheelZoom {
@@ -3269,7 +3272,18 @@ const onDragStart = (event: PointerEvent, type: DragType): void => {
       ? new LongPress(clientX, clientY, MIN_DRAG, () => {
           onLongPress(clientX, clientY);
         })
-      : undefined
+      : undefined,
+    canScrub:
+      type === 'nsew' &&
+      isDirectPointer(event.pointerType) &&
+      lastTap?.type === 'nsew' &&
+      isDoubleTap(lastTap, {
+        pressTime: event.timeStamp,
+        releaseTime: event.timeStamp,
+        x: position.x,
+        y: position.y
+      }),
+    scrubbing: false
   };
 
   // Listen for pointer, mouse, and keyboard events on the window, as well as for it losing focus, so that we can
@@ -3314,6 +3328,28 @@ const onDragMove = (event: PointerEvent): void => {
 
   currentDrag.x = position.x;
   currentDrag.y = position.y;
+
+  // Scrub our hover tooltip if our finger (or pen) can do so and has moved far enough (see the scrubbing section
+  // below).
+
+  if (currentDrag.canScrub) {
+    if (
+      !currentDrag.scrubbing &&
+      Math.max(Math.abs(position.x - currentDrag.startX), Math.abs(position.y - currentDrag.startY)) >= MIN_DRAG
+    ) {
+      currentDrag.scrubbing = true;
+
+      currentDrag.longPress?.cancel();
+
+      longPressIndicator.value = null;
+    }
+
+    if (currentDrag.scrubbing) {
+      scrub(position, rect);
+    }
+
+    return;
+  }
 
   // A finger (or a pen) that moves too far before it has been held long enough can't become a long press anymore, and
   // until it has been held long enough, it doesn't zoom into our plotting area since it is there to scroll the page
@@ -3471,6 +3507,16 @@ const onDragEnd = (event: PointerEvent): void => {
   const tapped = !!currentDrag.longPress?.pending;
 
   stopDrag();
+
+  // Keep showing our hover tooltip where we stopped scrubbing, if we were (see the scrubbing section below).
+
+  if (currentDrag.scrubbing) {
+    lastTap = undefined;
+
+    queueHoverUpdate();
+
+    return;
+  }
 
   // Show our context menu if our finger (or pen) was held long enough without dragging (see the long presses section
   // below).
@@ -3687,6 +3733,8 @@ const startPinch = (currentDrag: Drag, event: PointerEvent): void => {
 
   currentDrag.longPress?.cancel();
 
+  currentDrag.canScrub = false;
+  currentDrag.scrubbing = false;
   currentDrag.zoomMode = '';
   currentDrag.pinch = {
     pointers: new Map([
@@ -4114,14 +4162,28 @@ const preventContextMenu = (event: MouseEvent): void => {
 };
 
 const onPlotTouchMove = (event: TouchEvent): void => {
-  // Stop the browser from scrolling the page if a second finger is used on our plotting area (to pinch) or if our
-  // finger has been held long enough (to zoom, see Note #4 of the pointer interaction section).
+  // Stop the browser from scrolling the page if a second finger is used on our plotting area (to pinch), if our finger
+  // has been held long enough (to zoom, see Note #4 of the pointer interaction section), or if it can scrub our hover
+  // tooltip (see the scrubbing section below).
   // Note: a touch move can't be cancelled once the browser has started scrolling the page, in which case our drag has
   //       already been cancelled (see onDragPointerCancel()).
 
-  if (event.cancelable && (event.touches.length > 1 || drag?.longPress?.fired)) {
+  if (event.cancelable && (event.touches.length > 1 || drag?.longPress?.fired || drag?.canScrub)) {
     event.preventDefault();
   }
+};
+
+// Scrubbing, i.e. moving our hover tooltip using a finger (or a pen), since it can't hover our plotting area. A tap
+// followed straight away (see isDoubleTap()) by a drag on our plotting area scrubs our hover tooltip (rather than
+// scrolls the page or zooms), which then remains shown where our drag stopped, as it does after a tap.
+// Note: our hover tooltip follows uPlot's cursor (see updateHover()), so we move it to where our finger is (within our
+//       plotting area, so that our hover tooltip doesn't disappear if our finger goes beyond it).
+
+const scrub = (position: { x: number; y: number }, rect: PlotRect): void => {
+  plot?.setCursor({
+    left: Math.min(Math.max(position.x, 0), rect.width),
+    top: Math.min(Math.max(position.y, 0), rect.height)
+  });
 };
 
 // Long presses, i.e. holding a finger (or a pen) still for a moment (see LongPress), which, once released, show our
@@ -5859,6 +5921,7 @@ interface HoverRow {
 interface Hover {
   clientX: number;
   clientY: number;
+  aboveFinger: boolean;
   guideX: number;
   guideWidth: number;
   points: HoverPoint[];
@@ -6016,7 +6079,8 @@ const hoveredIndex = (
 };
 
 const updateHover = (): void => {
-  // Make sure that we have a plot, that the mouse pointer is over our plotting area, and that we are not dragging.
+  // Make sure that we have a plot, that the mouse pointer is over our plotting area, and that we are not dragging
+  // (unless we are scrubbing, see the scrubbing section above).
 
   const u = plot;
   const rect = plotRect.value;
@@ -6025,7 +6089,17 @@ const updateHover = (): void => {
   const top = u?.cursor.top;
   const area = u ? pathArea(u) : undefined;
 
-  if (!u || !rect || !mainDiv || !area || drag || left == null || top == null || left < 0 || top < 0) {
+  if (
+    !u ||
+    !rect ||
+    !mainDiv ||
+    !area ||
+    (drag && !drag.scrubbing) ||
+    left == null ||
+    top == null ||
+    left < 0 ||
+    top < 0
+  ) {
     hover.value = null;
 
     return;
@@ -6122,6 +6196,7 @@ const updateHover = (): void => {
   hover.value = {
     clientX: mainDivRect.left + rect.left + left,
     clientY: mainDivRect.top + rect.top + top,
+    aboveFinger: isDirectPointer(lastPointerType),
     guideX: (Math.round((xValue - cssArea.xMin) * xFactor * pxRatio) + 0.5 * (guideWidth % 2)) / pxRatio,
     guideWidth: guideWidth / pxRatio,
     points,
@@ -6145,10 +6220,27 @@ const placeHoverTooltip = (): void => {
     return;
   }
 
-  // Place our hover tooltip to the right of the mouse pointer or, if there isn't enough room for it, to its left, and
-  // vertically centred on it, while keeping it within the window.
+  // Place our hover tooltip above a finger (or a pen), horizontally centred on it, so that it doesn't get hidden by it,
+  // if there is enough room for it.
 
   const { width, height } = tooltip.getBoundingClientRect();
+  const aboveTop = currentHover.clientY - TOUCH_TARGET_SIZE - height;
+
+  if (currentHover.aboveFinger && aboveTop >= HOVER_TOOLTIP_MARGIN) {
+    const aboveLeft = Math.min(
+      Math.max(currentHover.clientX - 0.5 * width, HOVER_TOOLTIP_MARGIN),
+      window.innerWidth - width - HOVER_TOOLTIP_MARGIN
+    );
+
+    tooltip.style.left = `${Math.max(aboveLeft, HOVER_TOOLTIP_MARGIN)}px`;
+    tooltip.style.top = `${aboveTop}px`;
+
+    return;
+  }
+
+  // Otherwise, place our hover tooltip to the right of the mouse pointer or, if there isn't enough room for it, to its
+  // left, and vertically centred on it, while keeping it within the window.
+
   const rightLeft = currentHover.clientX + HOVER_TOOLTIP_OFFSET;
   const left =
     rightLeft + width + HOVER_TOOLTIP_MARGIN <= window.innerWidth
