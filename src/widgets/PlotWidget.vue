@@ -7,6 +7,7 @@
       }"
       @contextmenu="onContextMenu"
       @pointerdown.capture="onPanelPointerDown"
+      @pointermove.capture="onPanelPointerMove"
       @touchend="onPanelTouchEnd"
       @click.capture="onPanelClick"
     >
@@ -4309,6 +4310,16 @@ const onPanelPointerDown = (event: PointerEvent): void => {
   // double-taps section above).
 
   swallowClick = false;
+  lastPointerType = event.pointerType;
+};
+
+const onPanelPointerMove = (event: PointerEvent): void => {
+  // Keep track of the type of the pointer that is moving over our panel since it may not be the one that was last
+  // pressed, e.g., a mouse that hovers our plot after it was tapped, in which case our hover tooltip should be shown to
+  // the right of the mouse pointer rather than above it (see updateHover()).
+  // Note: this doesn't affect our double-taps (see the double-taps section above) since the mouse events that the
+  //       browser emulates after a tap aren't pointer events.
+
   lastPointerType = event.pointerType;
 };
 
