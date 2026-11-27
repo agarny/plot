@@ -1220,7 +1220,7 @@ const onLegendPointerDown = (event: PointerEvent, index: number): void => {
     clientY,
     legendItemElement: event.currentTarget as HTMLElement,
     longPress: new LongPress(clientX, clientY, MIN_DRAG, () => {
-      onLongPress(clientX, clientY);
+      onLongPress(event.pointerId, clientX, clientY);
     })
   };
 
@@ -1265,7 +1265,7 @@ const onLegendPressEnd = (event: PointerEvent): void => {
   stopLegendPress();
 
   if (currentLegendPress.longPress.fired) {
-    requestLongPressContextMenu(event, currentLegendPress.legendItemElement);
+    requestContextMenu(event, currentLegendPress.legendItemElement);
 
     return;
   }
@@ -1289,6 +1289,7 @@ const onLegendPressEnd = (event: PointerEvent): void => {
 
   if (doubleTapped) {
     swallowClick = true;
+    releaseTime = event.timeStamp;
 
     onLegendDoubleClick(index);
   }
@@ -1551,7 +1552,9 @@ const onContextMenu = (event: MouseEvent): void => {
   if (ignoreNextContextMenu) {
     ignoreNextContextMenu = false;
 
-    return;
+    if (followsRelease(event)) {
+      return;
+    }
   }
 
   // Show our context menu.
@@ -3312,7 +3315,7 @@ const onDragStart = (event: PointerEvent, type: DragType): void => {
     pinch: undefined,
     longPress: isDirectPointer(event.pointerType)
       ? new LongPress(clientX, clientY, MIN_DRAG, () => {
-          onLongPress(clientX, clientY);
+          onLongPress(event.pointerId, clientX, clientY);
         })
       : undefined,
     canScrub:
@@ -3585,7 +3588,7 @@ const onDragEnd = (event: PointerEvent): void => {
   // below).
 
   if (currentDrag.longPress?.fired && !dragged) {
-    requestLongPressContextMenu(event);
+    requestContextMenu(event);
 
     return;
   }
@@ -4316,19 +4319,28 @@ const scrub = (position: { x: number; y: number }, rect: PlotRect): void => {
 //          it before the finger is released, which wouldn't let a long press on our plotting area be followed by a drag
 //          (see the pointer interaction section above). So, we ignore the context menus that the browser requests while
 //          we are tracking a long press (see onContextMenu()), as well as the one that it may request once our long
-//          press has been released (e.g., with a pen on Windows, see requestLongPressContextMenu()).
+//          press has been released (e.g., with a pen on Windows, see onLongPress()).
 // Note #2: we show where our long press is once our finger (or pen) has been held long enough, since nothing else tells
 //          that it can now be released (to show our context menu) or dragged (to zoom).
 // Note #3: once released, a long press must not also be considered as a tap (e.g., toggling the visibility of a trace
 //          or showing our hover tooltip), so we prevent our touch end from emulating mouse events (including a click),
 //          and we swallow the click that may follow the release of a pen. We do the same for the second tap of a
 //          double-tap on a legend item (see onLegendPressEnd()).
+// Note #4: the browser sends the events that follow the release of a pointer (e.g., a click) straight after it, so we
+//          only swallow a click and ignore a context menu while our long press is held or until RELEASE_EVENTS_DELAY
+//          milliseconds after its release (see followsRelease()). Otherwise, if the browser doesn't send them (e.g., a
+//          touch end that we prevent isn't followed by a click, and iOS never requests a context menu), the next ones
+//          would get swallowed/ignored (e.g., a context menu requested using the keyboard or an assistive technology).
+
+const RELEASE_EVENTS_DELAY = 300; // Maximum time (in milliseconds) between the release of a pointer and its events.
 
 const longPressIndicator = vue.shallowRef<{ left: number; top: number } | null>(null);
 let swallowClick = false;
 let ignoreNextContextMenu = false;
+let heldLongPressPointerId: number | undefined;
+let releaseTime = Number.NEGATIVE_INFINITY;
 
-const onLongPress = (clientX: number, clientY: number): void => {
+const onLongPress = (pointerId: number, clientX: number, clientY: number): void => {
   // Our finger (or pen) has been held long enough, so show where it is (relative to our panel).
 
   const mainDivRect = mainDivRef.value?.getBoundingClientRect();
@@ -4337,18 +4349,49 @@ const onLongPress = (clientX: number, clientY: number): void => {
     left: clientX - (mainDivRect?.left ?? 0),
     top: clientY - (mainDivRect?.top ?? 0)
   };
+
+  // Swallow the click and ignore the context menu that may follow the release of our finger (or pen), whether or not
+  // it then shows our context menu (e.g., not if it has been dragged or backed out of), since the browser may still
+  // emulate a right-click once a pointer that was held has been released (e.g., with a pen on Windows). So, keep track
+  // of when our finger (or pen) gets released (see Note #4 above).
+  // Note: we can't use swallowClick to ignore that context menu since it gets reset by the click that may follow the
+  //       release of a pen (see onPanelClick()).
+
   swallowClick = true;
+  ignoreNextContextMenu = true;
+  heldLongPressPointerId = pointerId;
+
+  window.addEventListener('pointerup', onLongPressRelease, true);
+  window.addEventListener('pointercancel', onLongPressRelease, true);
+  window.addEventListener('pointerout', onLongPressRelease, true);
 };
 
-const requestLongPressContextMenu = (event: PointerEvent, target: EventTarget | null = event.target): void => {
-  // Show our context menu now that our long press has been released, and ignore the context menu that the browser may
-  // request next (see onContextMenu()), e.g., when it emulates a right-click once a pen (or a finger) that was held has
-  // been released, as on Windows.
-  // Note: we can't rely on swallowClick since it gets reset by the click that may follow the release of a pen.
+const onLongPressRelease = (event: PointerEvent): void => {
+  // Our finger (or pen) has been released or, if it has left the window, it may be released without us knowing, so
+  // consider that it has been released then.
 
-  requestContextMenu(event, target);
+  if (event.pointerId !== heldLongPressPointerId || (event.type === 'pointerout' && event.relatedTarget)) {
+    return;
+  }
 
-  ignoreNextContextMenu = true;
+  stopTrackingLongPressRelease();
+
+  releaseTime = event.timeStamp;
+};
+
+const stopTrackingLongPressRelease = (): void => {
+  window.removeEventListener('pointerup', onLongPressRelease, true);
+  window.removeEventListener('pointercancel', onLongPressRelease, true);
+  window.removeEventListener('pointerout', onLongPressRelease, true);
+
+  heldLongPressPointerId = undefined;
+};
+
+const followsRelease = (event: Event): boolean => {
+  // Return whether the given event may follow the release of our long press, or of the second tap of a double-tap on a
+  // legend item (see Note #4 above).
+
+  return heldLongPressPointerId !== undefined || event.timeStamp - releaseTime <= RELEASE_EVENTS_DELAY;
 };
 
 // Whether a pen is used on our plotting area and the browser doesn't turn it into touch events (e.g., Chrome on
@@ -4400,7 +4443,7 @@ const onPanelTouchStart = (): void => {
 };
 
 const onPanelTouchEnd = (event: TouchEvent): void => {
-  if (swallowClick && event.cancelable) {
+  if (swallowClick && event.cancelable && followsRelease(event)) {
     event.preventDefault();
   }
 };
@@ -4408,7 +4451,7 @@ const onPanelTouchEnd = (event: TouchEvent): void => {
 const onPanelClick = (event: MouseEvent): void => {
   // Note: a click that is generated using the keyboard has no detail, so it can't follow a long press.
 
-  if (swallowClick && event.detail > 0) {
+  if (swallowClick && event.detail > 0 && followsRelease(event)) {
     event.preventDefault();
     event.stopPropagation();
   }
@@ -6983,6 +7026,7 @@ vue.onBeforeUnmount(() => {
 
   stopDrag();
   stopLegendPress();
+  stopTrackingLongPressRelease();
   stopRangeAnimation();
 
   closeRangeEditor(false);
