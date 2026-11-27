@@ -81,9 +81,10 @@ The component is the default export of `@opencor/plot`, and is also exported as 
 | `PlotCsvExportFinishedEvent` | `{ type: 'finished'; success: boolean }` | An export to CSV has finished, whether successfully (and the file was downloaded) or not. |
 | `PlotImageExportEvent` | `{ action: 'copy' \| 'export'; format: 'jpeg' \| 'png' \| 'svg' \| 'webp'; success: boolean }` | The payload of the [`imageExport`](#events) event: whether the plot was copied to the clipboard (always as PNG) or exported to an image file, in which format, and whether it worked. |
 | `PlotContextMenuEvent` | `{ clientX: number; clientY: number; usingKeyboard: boolean; items: ContextMenuItem[] }` | The payload of the [`contextMenu`](#events) event: where the context menu was requested (in client coordinates), whether it was requested using the keyboard (in which case the custom menu should take the keyboard focus), and the items that our context menu would have shown. These items reflect the plot as it was when the context menu was requested and don't get updated if the data changes while the custom context menu is shown, but their commands always act on the plot as it is when they are chosen. |
-| `ContextMenuItem` | `ContextMenuAction \| ContextMenuSeparator` | An item of a context menu. |
+| `ContextMenuItem` | `ContextMenuAction \| ContextMenuSeparator \| ContextMenuHeader` | An item of a context menu. |
 | `ContextMenuAction` | `{ label: string; icon?: IconName; checked?: boolean; command?: () => void; items?: ContextMenuItem[] }` | An action: its `label`, its `icon`, whether it is checked (only for a checkable action, e.g. to make an axis logarithmic), the `command` to call when it is chosen, and its submenu `items`, if any. |
 | `ContextMenuSeparator` | `{ separator: true }` | A separator. |
+| `ContextMenuHeader` | `{ header: string }` | A header that can't be chosen, e.g. the full name of a trace when the context menu is requested from its legend item. It can contain a little HTML (see [Data](#data)). |
 | `IconName` | `'angle-right' \| 'arrows-h' \| 'arrows-v' \| 'chart-line' \| 'check' \| 'copy' \| 'download' \| 'eye' \| 'image' \| 'pencil' \| 'refresh' \| 'search-minus' \| 'search-plus'` | The name of an icon (from [PrimeIcons](https://primevue.org/icons/)). |
 | `PlotPointCounts` | `{ nbOfPoints: number; nbOfDrawnPoints: number }` | The value returned by the [`pointCounts()`](#methods) method. |
 | `PlotMemoryUsage` | `{ levelOfDetail: number; logValues: number }` | The value returned by the [`memoryUsage()`](#methods) method. |
@@ -142,7 +143,7 @@ Also set the [`live`](#props) prop while the data is live, so that the last poin
 | Prop | Type | Default | Description |
 |---|---|---|---|
 | `data` | [`PlotData`](#types) | (required) | The data to plot. |
-| `showLegend` | `boolean` | `true` | Whether to show the legend. The legend takes at most 40% of the width of the plot (with long trace names truncated, and shown in full when hovered), and is hidden if the plot is too narrow for it to be useful. |
+| `showLegend` | `boolean` | `true` | Whether to show the legend. The legend takes at most 40% of the width of the plot (with long trace names truncated, and shown in full when hovered or in the context menu of their legend item), and is hidden if the plot is too narrow for it to be useful. |
 | `theme` | [`PlotTheme`](#types) | `'system'` | Whether to use light or dark mode, or whatever the system uses. |
 | `margins` | [`PlotMargins`](#types) | | Margins shared with other plots, so that their plotting areas line up (see [`marginsUpdated`](#events)). |
 | `appendTo` | `HTMLElement \| string` | `body` | Where to append our overlays (context menu, hover tooltip, etc.). |
@@ -179,7 +180,7 @@ Like with [Plotly](https://plotly.com/javascript/):
 - **Middle of an axis:** drag to pan along that axis, use the mouse wheel to zoom along it, and double-click to reset its zoom.
 - **Ends of an axis and bottom corners:** drag to move an end of the axis, or click an end of the axis to type its value.
 - **Legend:** click a trace to show or hide it, double-click it to only show that trace (or all the traces again), and hover it to highlight its trace. Its context menu (right-click, or Shift+F10 once it has the focus) can also show only that trace (or all the traces again), or show or hide it if it is the only trace.
-- **Touch:** drag with one finger as with a mouse, or use two fingers to zoom and pan.
+- **Touch** (or a pen): on the plotting area, swipe to scroll the page, use two fingers to zoom and pan, and touch and hold, then drag to zoom. On the axes, drag with one finger as with a mouse. Tap and double-tap as you would click and double-click. Touch and hold, then release, to open the context menu (as with a right-click), including from a legend item. If a touchscreen is available, the axes can be dragged a bit further away from the plotting area, the ends of the axes are longer, and the legend items and context menu items are taller.
 - **Keyboard** (once the plot has the focus): `+` and `−` to zoom in and out, `0` to reset the zoom, the arrow keys to pan, and Shift+F10 (or the context menu key) to open the context menu (e.g., to type the value of an end of an axis). Each legend item can also get the focus: Enter or Space shows or hides its trace, and Shift+F10 opens its context menu.
 - **Escape**, or pressing another mouse button, cancels a drag.
 

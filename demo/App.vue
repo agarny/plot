@@ -151,7 +151,8 @@
       @keydown.escape="hideCustomMenu"
     >
       <li v-for="(item, index) in customMenu.items" :key="index">
-        <hr v-if="!item.command" />
+        <strong v-if="item.header">{{ item.label }}</strong>
+        <hr v-else-if="!item.command" />
         <button v-else type="button" @click="onCustomMenuItemClick(item.command)">{{ item.label }}</button>
       </li>
     </ul>
@@ -1088,6 +1089,7 @@ const statusRows = vue.computed(() => [
 
 interface CustomMenuItem {
   label: string;
+  header?: boolean;
   command?: () => void;
 }
 
@@ -1098,6 +1100,12 @@ const flattenedItems = (items: ContextMenuItem[], prefix: string = ''): CustomMe
   return items.flatMap((item: ContextMenuItem): CustomMenuItem[] => {
     if ('separator' in item) {
       return [{ label: '' }];
+    }
+
+    if ('header' in item) {
+      return [
+        { label: new DOMParser().parseFromString(item.header, 'text/html').body.textContent ?? '', header: true }
+      ];
     }
 
     const label = `${prefix}${item.label}${item.checked ? ' ✓' : ''}`;
@@ -1318,6 +1326,11 @@ const onWindowPointerDown = (event: PointerEvent): void => {
   .demo-custom-menu button:hover,
   .demo-custom-menu button:focus-visible {
     background-color: var(--demo-border);
+  }
+
+  .demo-custom-menu strong {
+    display: block;
+    padding: 0.25rem 0.5rem;
   }
 
   .demo-custom-menu hr {

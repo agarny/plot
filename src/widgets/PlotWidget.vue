@@ -6,6 +6,9 @@
         color: themeColors.text
       }"
       @contextmenu="onContextMenu"
+      @pointerdown.capture="onPanelPointerDown"
+      @touchend="onPanelTouchEnd"
+      @click.capture="onPanelClick"
     >
       <!--
       Note: our plot can be focused, so that it can be used with the keyboard (see onPlotKeyDown()), in which case it is
@@ -43,11 +46,12 @@
             top: `${dragger.top}px`,
             width: `${dragger.width}px`,
             height: `${dragger.height}px`,
-            cursor: `${dragger.type}-resize`
+            cursor: `${dragger.type}-resize`,
+            '--touch-inset': dragger.touchInset
           }"
           @pointerdown="onDragStart($event, dragger.type)"
           @mousedown="onPressMouseDown"
-          @dblclick="onDoubleClick(dragger.type)"
+          @dblclick="onDoubleClickEvent(dragger.type)"
           @wheel="onWheel($event, dragger.type)"
         />
         <div v-if="rangeEditor" ref="rangeEditorRef" class="range-editor"
@@ -55,6 +59,7 @@
           role="textbox"
           :aria-label="rangeEditorLabel"
           spellcheck="false"
+          enterkeyhint="done"
           :style="{
             left: `${rangeEditor.left}px`,
             top: `${rangeEditor.top}px`,
@@ -85,6 +90,15 @@
           v-html="common.sanitiseHtml(data.yAxisTitle)"
         />
       </template>
+      <div v-if="longPressIndicator" class="long-press-indicator"
+        :style="{
+          left: `${longPressIndicator.left}px`,
+          top: `${longPressIndicator.top}px`,
+          width: `${TOUCH_TARGET_SIZE}px`,
+          height: `${TOUCH_TARGET_SIZE}px`,
+          borderColor: themeColors.zoomStroke
+        }"
+      />
       <PlotLivePointsWidget ref="livePointsRef" :backgroundColor="themeColors.background" :textColor="themeColors.text" />
       <svg v-if="hover && plotRect" class="hover-overlay"
         :style="{ left: `${plotRect.left}px`, top: `${plotRect.top}px` }"
@@ -122,7 +136,8 @@
           :data-legend-index="legendItem.index"
           @click="onLegendClick($event, legendItem.index)"
           @keydown="onLegendKeyDown($event, legendItem.index)"
-          @dblclick="onLegendDoubleClick(legendItem.index)"
+          @dblclick="onLegendDoubleClickEvent(legendItem.index)"
+          @pointerdown="onLegendPointerDown($event, legendItem.index)"
           @pointerenter="onLegendPointerEnter($event, legendItem.index, legendItem.name)"
           @pointerleave="highlightTrace(null)"
           @focus="onLegendFocus($event, legendItem.index)"
@@ -177,6 +192,14 @@ import {
   valuesStatistics
 } from '../common/traceValues';
 import { isolatedTraceVisibilities, legendTraceAction, toggledTraceVisibilities } from '../common/traceVisibilityUtils';
+import {
+  axisEndSize,
+  isDirectPointer,
+  isDoubleTap,
+  LongPress,
+  TOUCH_TARGET_SIZE,
+  type Tap
+} from '../common/touchUtils';
 
 import '../assets/theme.css';
 
@@ -356,8 +379,8 @@ const props = withDefaults(
     margins?: PlotMargins;
     /**
      * Whether to show the legend (`true` by default). The legend takes at most 40% of the width of the plot (with long
-     * trace names truncated, and shown in full when hovered), and is hidden if the plot is too narrow for it to be
-     * useful.
+     * trace names truncated, and shown in full when hovered or in the context menu of their legend item), and is hidden
+     * if the plot is too narrow for it to be useful.
      */
     showLegend?: boolean;
     /** Whether to use light or dark mode, or whatever the system uses (`'system'` by default). */
@@ -648,6 +671,18 @@ const onPrefersColorSchemeChange = (event: MediaQueryListEvent): void => {
 const isDarkMode = vue.computed<boolean>(() => {
   return props.theme === 'dark' || (!systemUsesLightMode.value && props.theme !== 'light');
 });
+
+// Whether a coarse pointer (e.g., a finger) is available, even if it isn't the primary one (e.g., on a laptop with a
+// touchscreen or an iPad with a trackpad), in which case we make our axis (and corner) draggers easier to touch (see
+// the pointer interaction section below). Like for whether the system uses light mode, we only keep track of it while
+// we are mounted.
+
+const anyCoarsePointer = typeof window !== 'undefined' ? window.matchMedia('(any-pointer: coarse)') : null;
+const hasCoarsePointer = vue.ref<boolean>(anyCoarsePointer?.matches ?? false);
+
+const onAnyCoarsePointerChange = (event: MediaQueryListEvent): void => {
+  hasCoarsePointer.value = event.matches;
+};
 
 // The public CSS variables of our theme (see theme.css) that are set on our ancestors, which our overlays (i.e. our
 // hover tooltip and our context menu) get from us, since they may be appended elsewhere (see appendTo) and would
@@ -1130,6 +1165,131 @@ const onLegendKeyDown = (event: KeyboardEvent, index: number): void => {
   }
 };
 
+// A long press of a legend item using a finger (or a pen) shows our context menu for it once released (see the long
+// presses section below), which, among other things, shows the full name of its trace (since it may be truncated in our
+// legend, and its title doesn't get shown on touch devices, see onLegendPointerEnter()). Like on our plotting area and
+// axes, we also detect double-taps ourselves (see the double-taps section below).
+// Note: each tap of a double-tap gets clicked, so the first one toggles the visibility of our trace (which
+//       onLegendDoubleClick() takes into account), while the click of the second one gets swallowed (see the long
+//       presses section below), since it would otherwise toggle it again once our trace has been isolated.
+
+interface LegendPress {
+  pointerId: number;
+  index: number;
+  pressTime: number;
+  clientX: number;
+  clientY: number;
+  legendItemElement: HTMLElement;
+  longPress: LongPress;
+}
+
+let legendPress: LegendPress | undefined;
+let lastLegendTap: (Tap & { index: number }) | undefined;
+
+const onLegendDoubleClickEvent = (index: number): void => {
+  if (!isDirectPointer(lastPointerType)) {
+    onLegendDoubleClick(index);
+  }
+};
+
+const onLegendPointerDown = (event: PointerEvent, index: number): void => {
+  // Start tracking a press of a legend item using the main button of a finger (or a pen), in case it becomes a long
+  // press.
+
+  if (!isDirectPointer(event.pointerType) || !event.isPrimary || event.button !== 0) {
+    return;
+  }
+
+  stopLegendPress();
+
+  const { clientX, clientY } = event;
+
+  legendPress = {
+    pointerId: event.pointerId,
+    index,
+    pressTime: event.timeStamp,
+    clientX,
+    clientY,
+    legendItemElement: event.currentTarget as HTMLElement,
+    longPress: new LongPress(clientX, clientY, MIN_DRAG, () => {
+      onLongPress(clientX, clientY);
+    })
+  };
+
+  window.addEventListener('pointermove', onLegendPressMove);
+  window.addEventListener('pointerup', onLegendPressEnd);
+  window.addEventListener('pointercancel', onLegendPressCancel);
+};
+
+const onLegendPressMove = (event: PointerEvent): void => {
+  if (event.pointerId === legendPress?.pointerId) {
+    legendPress.longPress.move(event.clientX, event.clientY);
+  }
+};
+
+const onLegendPressEnd = (event: PointerEvent): void => {
+  // Show our context menu for our legend item if it was pressed long enough, or isolate its trace if it was double-
+  // tapped.
+
+  const currentLegendPress = legendPress;
+
+  if (event.pointerId !== currentLegendPress?.pointerId) {
+    return;
+  }
+
+  const tapped = currentLegendPress.longPress.pending;
+
+  stopLegendPress();
+
+  if (currentLegendPress.longPress.fired) {
+    requestContextMenu(event, currentLegendPress.legendItemElement);
+
+    return;
+  }
+
+  if (!tapped) {
+    lastLegendTap = undefined;
+
+    return;
+  }
+
+  const { index } = currentLegendPress;
+  const tap: Tap = {
+    pressTime: currentLegendPress.pressTime,
+    releaseTime: event.timeStamp,
+    x: currentLegendPress.clientX,
+    y: currentLegendPress.clientY
+  };
+  const doubleTapped = lastLegendTap?.index === index && isDoubleTap(lastLegendTap, tap);
+
+  lastLegendTap = doubleTapped ? undefined : { ...tap, index };
+
+  if (doubleTapped) {
+    swallowClick = true;
+
+    onLegendDoubleClick(index);
+  }
+};
+
+const onLegendPressCancel = (event: PointerEvent): void => {
+  // Stop tracking our press if the browser has taken over its pointer (e.g., to scroll our legend).
+
+  if (event.pointerId === legendPress?.pointerId) {
+    stopLegendPress();
+  }
+};
+
+const stopLegendPress = (): void => {
+  window.removeEventListener('pointermove', onLegendPressMove);
+  window.removeEventListener('pointerup', onLegendPressEnd);
+  window.removeEventListener('pointercancel', onLegendPressCancel);
+
+  legendPress?.longPress.cancel();
+
+  legendPress = undefined;
+  longPressIndicator.value = null;
+};
+
 // Context menu.
 
 // Note #1: when requested from a legend item, our context menu starts with an item to isolate the trace of that legend
@@ -1201,10 +1361,20 @@ const legendTraceMenuItem = (key: string, index: number): ContextMenuItem => {
   };
 };
 
+const legendTraceMenuHeader = (index: number): ContextMenuItem[] => {
+  // Return the header that our context menu starts with when it is requested from the legend item of the trace at the
+  // given index, i.e. the full name of that trace (if it has one), which may be truncated in our legend.
+
+  const name = props.data.traces[index]?.name;
+
+  return name ? [{ header: name }] : [];
+};
+
 const contextMenuItems = vue.computed<ContextMenuItem[]>(() => [
   ...(contextMenuLegendKey.value === null || contextMenuLegendTraceIndex.value === -1
     ? []
     : [
+        ...legendTraceMenuHeader(contextMenuLegendTraceIndex.value),
         legendTraceMenuItem(contextMenuLegendKey.value, contextMenuLegendTraceIndex.value),
         {
           separator: true as const
@@ -1347,6 +1517,20 @@ const onContextMenu = (event: MouseEvent): void => {
 
   event.preventDefault();
 
+  // Ignore a context menu that is requested using a long press of a finger (or a pen) on our plotting area, one of our
+  // axes, or a legend item (e.g., on Android), since we handle such long presses ourselves, so that they behave the
+  // same on all platforms (see the long presses section below).
+
+  if ((drag && isDirectPointer(drag.pointerType)) || legendPress) {
+    return;
+  }
+
+  // Show our context menu.
+
+  requestContextMenu(event);
+};
+
+const requestContextMenu = (event: MouseEvent, target: EventTarget | null = event.target): void => {
   // Hide our hover tooltip, if any, so that it doesn't get in the way of our context menu.
 
   hover.value = null;
@@ -1356,8 +1540,7 @@ const onContextMenu = (event: MouseEvent): void => {
   // Keep track of whether our context menu was requested from a legend item (see contextMenuItems), and of where the
   // keyboard focus should go once our context menu has been hidden (see onContextMenuHide()).
 
-  const legendItemElement =
-    event.target instanceof Element ? event.target.closest<HTMLElement>('[data-legend-index]') : null;
+  const legendItemElement = target instanceof Element ? target.closest<HTMLElement>('[data-legend-index]') : null;
 
   contextMenuLegendKey.value = legendKey(legendItemElement ? Number(legendItemElement.dataset.legendIndex) : undefined);
   contextMenuFocusTarget = legendItemElement;
@@ -2724,6 +2907,13 @@ const toggleLogAxis = (axisKey: AxisKey): void => {
 // Unlike with Plotly, a drag that is done using a finger can also become a pinch, i.e. a second finger can be used to
 // zoom (by moving both fingers closer to or further from each other) and pan (by moving both fingers), along both axes
 // or, if the drag started on an axis, along that axis only (see startPinch()).
+// With a finger (or a pen), our plotting area behaves differently, so that a plot that fills most of the screen (or
+// several stacked plots) doesn't stop the page from being scrolled:
+//  - a swipe scrolls the page (see Note #4 below);
+//  - a long press, i.e. holding still for a moment (see LongPress), followed by a drag zooms as with a mouse, while a
+//    long press that is released without dragging shows our context menu (as it does on our axes and legend items, see
+//    the long presses section below); and
+//  - taps, double-taps, and pinches behave as described above.
 // Note #1: unlike Plotly, we don't have top corners (i.e. 'nw' and 'ne') since they would be above our plotting area,
 //          i.e. outside of our container since we don't have a top margin (and having one, just for them, would waste
 //          some valuable vertical space, especially when we have several plots stacked on top of each other). So, they
@@ -2739,8 +2929,15 @@ const toggleLogAxis = (axisKey: AxisKey): void => {
 //          mouse button (see onPressMouseDown()), so that it doesn't move the keyboard focus or start selecting some
 //          text, and we use it to know how many times our mouse button was clicked (see onDragMouseDown()) since a
 //          pointer event doesn't tell us.
-// Note #4: a finger (or a pen) doesn't get to scroll or zoom the page when it is used on our plotting area or our axes
-//          since they don't allow the browser to handle touch gestures (see touch-action below).
+// Note #4: a finger (or a pen) doesn't get to scroll or zoom the page when it is used on our axes since they don't let
+//          the browser handle touch gestures (see touch-action below). Our plotting area lets the browser scroll (but
+//          not zoom) the page, in which case the browser takes over our pointer (see onDragPointerCancel()), but we
+//          stop it from doing so if a second finger is used (to pinch) or once our pointer has been held long enough
+//          (to zoom, see onPlotTouchMove()). If the page can't be scrolled, then the browser may not take over our
+//          pointer, so we ignore its moves until it has been held long enough (see onDragMove()).
+// Note #5: with a coarse pointer, our axis (and corner) draggers can be touched up to TOUCH_TARGET_SIZE pixels away
+//          from our plotting area (see their touch inset), without changing our layout, and the ends of our axes are at
+//          least TOUCH_TARGET_SIZE pixels long (as long as there is room for them, see axisEndSize()).
 
 type DragType = 'pan' | 'nsew' | 'ew' | 'w' | 'e' | 'ns' | 'n' | 's' | 'sw' | 'se';
 
@@ -2750,6 +2947,7 @@ interface Dragger {
   top: number;
   width: number;
   height: number;
+  touchInset: string;
 }
 
 const draggers = vue.computed<Dragger[]>(() => {
@@ -2766,16 +2964,67 @@ const draggers = vue.computed<Dragger[]>(() => {
   const bottom = top + height;
   const xDraggerTop = bottom + AXIS_DRAGGER_OFFSET;
   const yDraggerLeft = left - AXIS_DRAGGER_OFFSET - DRAGGER_SIZE;
+  const minEndSize = hasCoarsePointer.value ? TOUCH_TARGET_SIZE : 0;
+  const xEndSize = axisEndSize(width, minEndSize);
+  const yEndSize = axisEndSize(height, minEndSize);
+
+  // Let our draggers be touched further away from our plotting area (see Note #5 above).
+
+  const extension = `-${hasCoarsePointer.value ? TOUCH_TARGET_SIZE - DRAGGER_SIZE : 0}px`;
+  const xTouchInset = `0 0 ${extension} 0`;
+  const yTouchInset = `0 0 0 ${extension}`;
 
   return [
-    { type: 'ew', left: left + 0.1 * width, top: xDraggerTop, width: 0.8 * width, height: DRAGGER_SIZE },
-    { type: 'w', left, top: xDraggerTop, width: 0.1 * width, height: DRAGGER_SIZE },
-    { type: 'e', left: left + 0.9 * width, top: xDraggerTop, width: 0.1 * width, height: DRAGGER_SIZE },
-    { type: 'ns', left: yDraggerLeft, top: top + 0.1 * height, width: DRAGGER_SIZE, height: 0.8 * height },
-    { type: 's', left: yDraggerLeft, top: top + 0.9 * height, width: DRAGGER_SIZE, height: 0.1 * height },
-    { type: 'n', left: yDraggerLeft, top, width: DRAGGER_SIZE, height: 0.1 * height },
-    { type: 'sw', left: left - DRAGGER_SIZE, top: bottom, width: DRAGGER_SIZE, height: DRAGGER_SIZE },
-    { type: 'se', left: right, top: bottom, width: DRAGGER_SIZE, height: DRAGGER_SIZE }
+    {
+      type: 'ew',
+      left: left + xEndSize,
+      top: xDraggerTop,
+      width: width - 2 * xEndSize,
+      height: DRAGGER_SIZE,
+      touchInset: xTouchInset
+    },
+    { type: 'w', left, top: xDraggerTop, width: xEndSize, height: DRAGGER_SIZE, touchInset: xTouchInset },
+    {
+      type: 'e',
+      left: right - xEndSize,
+      top: xDraggerTop,
+      width: xEndSize,
+      height: DRAGGER_SIZE,
+      touchInset: xTouchInset
+    },
+    {
+      type: 'ns',
+      left: yDraggerLeft,
+      top: top + yEndSize,
+      width: DRAGGER_SIZE,
+      height: height - 2 * yEndSize,
+      touchInset: yTouchInset
+    },
+    {
+      type: 's',
+      left: yDraggerLeft,
+      top: bottom - yEndSize,
+      width: DRAGGER_SIZE,
+      height: yEndSize,
+      touchInset: yTouchInset
+    },
+    { type: 'n', left: yDraggerLeft, top, width: DRAGGER_SIZE, height: yEndSize, touchInset: yTouchInset },
+    {
+      type: 'sw',
+      left: left - DRAGGER_SIZE,
+      top: bottom,
+      width: DRAGGER_SIZE,
+      height: DRAGGER_SIZE,
+      touchInset: `0 0 ${extension} ${extension}`
+    },
+    {
+      type: 'se',
+      left: right,
+      top: bottom,
+      width: DRAGGER_SIZE,
+      height: DRAGGER_SIZE,
+      touchInset: `0 ${extension} ${extension} 0`
+    }
   ];
 });
 
@@ -2831,6 +3080,7 @@ interface Drag {
   pointerId: number;
   pointerType: string;
   clickCount: number | undefined;
+  pressTime: number;
   startX: number;
   startY: number;
   x: number;
@@ -2843,6 +3093,7 @@ interface Drag {
   zoomRanges: Partial<Record<AxisKey, Range>>;
   box: Box;
   pinch: Pinch | undefined;
+  longPress: LongPress | undefined;
 }
 
 interface WheelZoom {
@@ -2982,18 +3233,21 @@ const onDragStart = (event: PointerEvent, type: DragType): void => {
   stopDrag();
 
   // Keep track of what we are dragging, the pointer with which we are dragging, our starting (and current) position,
-  // our current ranges, a copy of our zoom ranges (so that cancelDrag() can restore them), and our zoom box.
+  // our current ranges, a copy of our zoom ranges (so that cancelDrag() can restore them), our zoom box, and whether
+  // our finger (or pen) gets held long enough (see the long presses section below).
   // Note: we only know how many times a mouse (or a pen) has been clicked once its mouse press has been emulated (see
   //       onDragMouseDown()), while a press using a finger is considered as a single click (since its mouse press is
   //       only emulated once it has been released, if at all, i.e. after our drag is over).
 
   const position = plotPosition(event, rect);
+  const { clientX, clientY } = event;
 
   drag = {
     type,
     pointerId: event.pointerId,
     pointerType: event.pointerType,
     clickCount: event.pointerType === 'touch' ? 1 : undefined,
+    pressTime: event.timeStamp,
     startX: position.x,
     startY: position.y,
     x: position.x,
@@ -3012,7 +3266,12 @@ const onDragStart = (event: PointerEvent, type: DragType): void => {
       top: 0,
       bottom: 0
     },
-    pinch: undefined
+    pinch: undefined,
+    longPress: isDirectPointer(event.pointerType)
+      ? new LongPress(clientX, clientY, MIN_DRAG, () => {
+          onLongPress(clientX, clientY);
+        })
+      : undefined
   };
 
   // Listen for pointer, mouse, and keyboard events on the window, as well as for it losing focus, so that we can
@@ -3058,6 +3317,20 @@ const onDragMove = (event: PointerEvent): void => {
   currentDrag.x = position.x;
   currentDrag.y = position.y;
 
+  // A finger (or a pen) that moves too far before it has been held long enough can't become a long press anymore, and
+  // until it has been held long enough, it doesn't zoom into our plotting area since it is there to scroll the page
+  // (see Note #4 above).
+
+  const longPress = currentDrag.longPress;
+
+  if (longPress) {
+    longPress.move(event.clientX, event.clientY);
+
+    if (currentDrag.type === 'nsew' && !longPress.fired) {
+      return;
+    }
+  }
+
   // Use the cursor of our drag while dragging (see dragCursor), but only once our mouse has moved far enough from where
   // our drag started.
   // Note: a click (or a double-click) often comes with a bit of mouse movement, in which case our mouse button would be
@@ -3071,6 +3344,7 @@ const onDragMove = (event: PointerEvent): void => {
   ) {
     dragCursor.value =
       currentDrag.type === 'pan' ? 'move' : currentDrag.type === 'nsew' ? 'crosshair' : `${currentDrag.type}-resize`;
+    longPressIndicator.value = null;
   }
 
   // If we are panning our plotting area or dragging an axis (or a corner), then pan/move our axes, coalescing our
@@ -3196,8 +3470,41 @@ const onDragEnd = (event: PointerEvent): void => {
   //       it resets it.
 
   const dragged = !!dragCursor.value;
+  const tapped = !!currentDrag.longPress?.pending;
 
   stopDrag();
+
+  // Show our context menu if our finger (or pen) was held long enough without dragging (see the long presses section
+  // below).
+
+  if (currentDrag.longPress?.fired && !dragged) {
+    requestContextMenu(event);
+
+    return;
+  }
+
+  // Handle a double-tap ourselves, i.e. a tap that is close enough (in time and space) to a previous tap on the same
+  // part of our plot (see the double-taps section below).
+
+  if (tapped) {
+    const tap: Tap = {
+      pressTime: currentDrag.pressTime,
+      releaseTime: event.timeStamp,
+      x: currentDrag.startX,
+      y: currentDrag.startY
+    };
+    const doubleTapped = lastTap?.type === currentDrag.type && isDoubleTap(lastTap, tap);
+
+    lastTap = doubleTapped ? undefined : { ...tap, type: currentDrag.type };
+
+    if (doubleTapped) {
+      onDoubleClick(currentDrag.type);
+
+      return;
+    }
+  } else {
+    lastTap = undefined;
+  }
 
   // If we were dragging an axis (or a corner), then make sure that our axes reflect where we stopped dragging or, like
   // Plotly, open our range editor if we clicked one end of an axis (but not if it is the second click of a
@@ -3380,6 +3687,8 @@ const startPinch = (currentDrag: Drag, event: PointerEvent): void => {
 
   const position = plotPosition(event, rect);
 
+  currentDrag.longPress?.cancel();
+
   currentDrag.zoomMode = '';
   currentDrag.pinch = {
     pointers: new Map([
@@ -3393,6 +3702,7 @@ const startPinch = (currentDrag: Drag, event: PointerEvent): void => {
 
   zoomBox.value = null;
   dragCursor.value = null;
+  longPressIndicator.value = null;
 };
 
 const movePinch = (pinch: Pinch, event: PointerEvent, rect: PlotRect): void => {
@@ -3463,6 +3773,21 @@ const applyPinch = (pinch: Pinch): void => {
   }
 
   zoomTo(ranges);
+};
+
+// Double-taps, which we detect ourselves (see onDragEnd()) rather than rely on the browser turning them into double-
+// clicks, since not all browsers do (e.g., Chrome's device toolbar in DevTools doesn't). So, we ignore the double-
+// clicks that follow the press of a finger (or a pen), so that a double-tap doesn't also count as a double-click.
+// Note: a double-tap must be done on the same part of our plot (e.g., the middle of the X axis), and a press that moves
+//       or is held long enough (i.e. a swipe or a long press) can't be part of a double-tap.
+
+let lastTap: (Tap & { type: DragType }) | undefined;
+let lastPointerType = '';
+
+const onDoubleClickEvent = (type: DragType): void => {
+  if (!isDirectPointer(lastPointerType)) {
+    onDoubleClick(type);
+  }
 };
 
 const onDoubleClick = (type: DragType): void => {
@@ -3753,10 +4078,13 @@ const stopDrag = (): void => {
     dragRafId = undefined;
   }
 
+  drag?.longPress?.cancel();
+
   drag = undefined;
   hover.value = null;
   dragCursor.value = null;
   zoomBox.value = null;
+  longPressIndicator.value = null;
 };
 
 const cancelDrag = (): void => {
@@ -3782,6 +4110,70 @@ const preventContextMenu = (event: MouseEvent): void => {
   event.stopPropagation();
 
   window.removeEventListener('contextmenu', preventContextMenu, true);
+};
+
+const onPlotTouchMove = (event: TouchEvent): void => {
+  // Stop the browser from scrolling the page if a second finger is used on our plotting area (to pinch) or if our
+  // finger has been held long enough (to zoom, see Note #4 of the pointer interaction section).
+  // Note: a touch move can't be cancelled once the browser has started scrolling the page, in which case our drag has
+  //       already been cancelled (see onDragPointerCancel()).
+
+  if (event.cancelable && (event.touches.length > 1 || drag?.longPress?.fired)) {
+    event.preventDefault();
+  }
+};
+
+// Long presses, i.e. holding a finger (or a pen) still for a moment (see LongPress), which, once released, show our
+// context menu on our plotting area, axes, and legend items, as a right-click does with a mouse.
+// Note #1: we detect long presses ourselves since iOS doesn't request a context menu on a long press, and Android does
+//          it before the finger is released, which wouldn't let a long press on our plotting area be followed by a drag
+//          (see the pointer interaction section above). So, we ignore the context menus that the browser requests while
+//          we are tracking a long press (see onContextMenu()).
+// Note #2: we show where our long press is once our finger (or pen) has been held long enough, since nothing else tells
+//          that it can now be released (to show our context menu) or dragged (to zoom).
+// Note #3: once released, a long press must not also be considered as a tap (e.g., toggling the visibility of a trace
+//          or showing our hover tooltip), so we prevent our touch end from emulating mouse events (including a click),
+//          and we swallow the click that may follow the release of a pen. We do the same for the second tap of a
+//          double-tap on a legend item (see onLegendPressEnd()).
+
+const longPressIndicator = vue.shallowRef<{ left: number; top: number } | null>(null);
+let swallowClick = false;
+
+const onLongPress = (clientX: number, clientY: number): void => {
+  // Our finger (or pen) has been held long enough, so show where it is (relative to our panel).
+
+  const mainDivRect = mainDivRef.value?.getBoundingClientRect();
+
+  longPressIndicator.value = {
+    left: clientX - (mainDivRect?.left ?? 0),
+    top: clientY - (mainDivRect?.top ?? 0)
+  };
+  swallowClick = true;
+};
+
+const onPanelPointerDown = (event: PointerEvent): void => {
+  // A new press can't be the end of a previous long press. Also keep track of the type of its pointer (see the
+  // double-taps section above).
+
+  swallowClick = false;
+  lastPointerType = event.pointerType;
+};
+
+const onPanelTouchEnd = (event: TouchEvent): void => {
+  if (swallowClick && event.cancelable) {
+    event.preventDefault();
+  }
+};
+
+const onPanelClick = (event: MouseEvent): void => {
+  // Note: a click that is generated using the keyboard has no detail, so it can't follow a long press.
+
+  if (swallowClick && event.detail > 0) {
+    event.preventDefault();
+    event.stopPropagation();
+  }
+
+  swallowClick = false;
 };
 
 // Keyboard interaction, i.e. once our plot has the keyboard focus (see our template):
@@ -6140,8 +6532,11 @@ const createPlot = (width: number, height: number): void => {
     onDragStart(event, event.shiftKey ? 'pan' : 'nsew')
   );
   plot.over.addEventListener('mousedown', onPressMouseDown);
-  plot.over.addEventListener('dblclick', () => onDoubleClick('nsew'));
+  plot.over.addEventListener('dblclick', () => onDoubleClickEvent('nsew'));
   plot.over.addEventListener('wheel', (event: WheelEvent) => onWheel(event, 'nsew'), {
+    passive: false
+  });
+  plot.over.addEventListener('touchmove', onPlotTouchMove, {
     passive: false
   });
 };
@@ -6278,6 +6673,14 @@ vue.onMounted(() => {
 
     prefersColorScheme.addEventListener('change', onPrefersColorSchemeChange);
   }
+
+  // Start tracking whether a coarse pointer is available.
+
+  if (anyCoarsePointer) {
+    hasCoarsePointer.value = anyCoarsePointer.matches;
+
+    anyCoarsePointer.addEventListener('change', onAnyCoarsePointerChange);
+  }
 });
 
 vue.onBeforeUnmount(() => {
@@ -6288,6 +6691,10 @@ vue.onBeforeUnmount(() => {
   // Stop tracking whether the system uses light mode.
 
   prefersColorScheme?.removeEventListener('change', onPrefersColorSchemeChange);
+
+  // Stop tracking whether a coarse pointer is available.
+
+  anyCoarsePointer?.removeEventListener('change', onAnyCoarsePointerChange);
 
   // Stop zooming (including any zoom animation), hovering, and dragging, and close our range editor (discarding its
   // value).
@@ -6305,6 +6712,7 @@ vue.onBeforeUnmount(() => {
   }
 
   stopDrag();
+  stopLegendPress();
   stopRangeAnimation();
 
   closeRangeEditor(false);
@@ -6642,6 +7050,21 @@ vue.watch(
   }
 
   /**
+   * Note: with a coarse pointer (e.g., a finger), our legend items are taller, so that they are easier to touch.
+   */
+
+  @media (any-pointer: coarse) {
+    .legend-item {
+      min-height: 28px;
+      line-height: 28px;
+    }
+
+    .legend-swatch {
+      top: 12.5px;
+    }
+  }
+
+  /**
    * Note: we use OpenCOR's font (which we inherit, like our axis titles and legend), but with the font size that Plotly
    *       means to use for its range editor, i.e. 12px (Plotly gets its unit wrong, so it actually uses the font size
    *       of the page, i.e. 16px), and with the same line height (relative to its font size) as Plotly's range editor.
@@ -6664,13 +7087,65 @@ vue.watch(
   }
 
   /**
-   * Note: a finger (or a pen) used on our plotting area or one of our axes is for us to handle (see Note #4 of the
-   *       pointer interaction section), i.e. not for the browser to scroll or zoom the page.
+   * Note #1: a finger (or a pen) used on one of our axes is for us to handle, while on our plotting area, it can also
+   *          be used by the browser to scroll (but not zoom) the page (see Note #4 of the pointer interaction section).
+   * Note #2: on our plotting area, our axes, and our legend, a long press is for us to handle (see the long presses
+   *          section), i.e. not for the browser to show its callout (e.g., on iOS) or to select some text.
+   * Note #3: on our legend, a finger can scroll our legend (and the page), but a double-tap isolates a trace rather
+   *          than zooms the page.
    */
 
-  :deep(.u-over),
+  :deep(.u-over) {
+    touch-action: pan-x pan-y;
+  }
+
   .dragger {
     touch-action: none;
+  }
+
+  .legend {
+    touch-action: manipulation;
+  }
+
+  :deep(.u-over),
+  .dragger,
+  .legend {
+    -webkit-touch-callout: none;
+    user-select: none;
+  }
+
+  /**
+   * Note: our draggers can be touched beyond their edges, away from our plotting area (see Note #5 of the pointer
+   *       interaction section).
+   */
+
+  .dragger::before {
+    content: "";
+    position: absolute;
+    inset: var(--touch-inset, 0);
+  }
+
+  .long-press-indicator {
+    position: absolute;
+    z-index: 3;
+    border: 2px solid;
+    border-radius: 50%;
+    transform: translate(-50%, -50%);
+    pointer-events: none;
+    animation: long-press-indicator 0.15s ease-out;
+  }
+
+  @keyframes long-press-indicator {
+    from {
+      transform: translate(-50%, -50%) scale(0.5);
+      opacity: 0;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .long-press-indicator {
+      animation: none;
+    }
   }
 
   /**
