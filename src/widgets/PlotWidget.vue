@@ -2997,8 +2997,9 @@ const toggleLogAxis = (axisKey: AxisKey): void => {
 //          not zoom) the page, in which case the browser takes over our pointer (see onDragPointerCancel()), but we
 //          stop it from doing so if a second finger is used (to pinch) or once our pointer has been held long enough
 //          (to zoom, see onPlotTouchMove()). If the page can't be scrolled, then the browser may not take over our
-//          pointer, so we ignore its moves until it has been held long enough (see onDragMove()). The same goes for a
-//          pen that the browser doesn't turn into touch events, since it can't scroll the page (see penPointer).
+//          pointer, so we ignore its moves until it has been held long enough (see onDragMove()). However, a pen that
+//          the browser doesn't turn into touch events can't scroll the page (see penPointer), so it zooms straight
+//          away, as a mouse does (e.g., a graphics tablet).
 // Note #5: with a coarse pointer, our axis (and corner) draggers can be touched up to TOUCH_TARGET_SIZE pixels away
 //          from our plotting area (see their touch inset), without changing our layout, and the ends of our axes are at
 //          least TOUCH_TARGET_SIZE pixels long (as long as there is room for them, see axisEndSize()).
@@ -3425,15 +3426,16 @@ const onDragMove = (event: PointerEvent): void => {
   }
 
   // A finger (or a pen) that moves too far before it has been held long enough can't become a long press anymore, and
-  // until it has been held long enough, it doesn't zoom into our plotting area since it is there to scroll the page
-  // (see Note #4 above).
+  // until it has been held long enough, it doesn't zoom into our plotting area since it is there to scroll the page. A
+  // pen that the browser doesn't turn into touch events can't scroll the page, though, so it zooms straight away, as a
+  // mouse does (see Note #4 above).
 
   const longPress = currentDrag.longPress;
 
   if (longPress) {
     longPress.move(event.clientX, event.clientY);
 
-    if (currentDrag.type === 'nsew' && !longPress.fired) {
+    if (currentDrag.type === 'nsew' && !longPress.fired && (currentDrag.pointerType !== 'pen' || penTouchEvents)) {
       return;
     }
   }
