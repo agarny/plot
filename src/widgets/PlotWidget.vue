@@ -1177,13 +1177,17 @@ const onLegendKeyDown = (event: KeyboardEvent, index: number): void => {
 // presses section below), which, among other things, shows the full name of its trace (since it may be truncated in our
 // legend, and its title doesn't get shown on touch devices, see onLegendPointerEnter()). Like on our plotting area and
 // axes, we also detect double-taps ourselves (see the double-taps section below).
-// Note: each tap of a double-tap gets clicked, so the first one toggles the visibility of our trace (which
-//       onLegendDoubleClick() takes into account), while the click of the second one gets swallowed (see the long
-//       presses section below), since it would otherwise toggle it again once our trace has been isolated.
+// Note #1: each tap of a double-tap gets clicked, so the first one toggles the visibility of our trace (which
+//          onLegendDoubleClick() takes into account), while the click of the second one gets swallowed (see the long
+//          presses section below), since it would otherwise toggle it again once our trace has been isolated.
+// Note #2: we keep track of the trace of a pressed legend item using its key rather than its index, for the same reason
+//          as for our context menu (see Note #3 of the context menu section below), since our data may get updated
+//          while our legend item is pressed (e.g., held for a long press), in which case our legend item may then be
+//          that of another trace.
 
 interface LegendPress {
   pointerId: number;
-  index: number;
+  key: string | null;
   pressTime: number;
   clientX: number;
   clientY: number;
@@ -1192,7 +1196,7 @@ interface LegendPress {
 }
 
 let legendPress: LegendPress | undefined;
-let lastLegendTap: (Tap & { index: number }) | undefined;
+let lastLegendTap: (Tap & { key: string }) | undefined;
 
 const onLegendDoubleClickEvent = (index: number): void => {
   if (!isDirectPointer(lastPointerType)) {
@@ -1214,7 +1218,7 @@ const onLegendPointerDown = (event: PointerEvent, index: number): void => {
 
   legendPress = {
     pointerId: event.pointerId,
-    index,
+    key: legendKey(index),
     pressTime: event.timeStamp,
     clientX,
     clientY,
@@ -1266,8 +1270,20 @@ const onLegendPressEnd = (event: PointerEvent): void => {
 
   stopLegendPress();
 
+  // Do nothing if the trace of our legend item has been removed while it was pressed (see Note #2 above). Otherwise,
+  // use the legend item of that trace, which may not be the one that was pressed anymore.
+
+  const { key } = currentLegendPress;
+  const index = legendTraceIndex(key);
+
+  if (key === null || index === -1) {
+    lastLegendTap = undefined;
+
+    return;
+  }
+
   if (currentLegendPress.longPress.fired) {
-    requestContextMenu(event, currentLegendPress.legendItemElement);
+    requestContextMenu(event, legendRef.value?.querySelector(`[data-legend-index="${index}"]`) ?? null);
 
     return;
   }
@@ -1278,16 +1294,15 @@ const onLegendPressEnd = (event: PointerEvent): void => {
     return;
   }
 
-  const { index } = currentLegendPress;
   const tap: Tap = {
     pressTime: currentLegendPress.pressTime,
     releaseTime: event.timeStamp,
     x: currentLegendPress.clientX,
     y: currentLegendPress.clientY
   };
-  const doubleTapped = lastLegendTap?.index === index && isDoubleTap(lastLegendTap, tap);
+  const doubleTapped = lastLegendTap?.key === key && isDoubleTap(lastLegendTap, tap);
 
-  lastLegendTap = doubleTapped ? undefined : { ...tap, index };
+  lastLegendTap = doubleTapped ? undefined : { ...tap, key };
 
   if (doubleTapped) {
     swallowClick = true;
